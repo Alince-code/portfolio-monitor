@@ -13,23 +13,19 @@ NC='\033[0m' # No Color
 
 # Helper functions
 api_get() {
-    curl -s "${API_BASE}$1" | python3 -m json.tool 2>/dev/null || echo "Error: API request failed"
+    curl -s "${API_BASE}$1" 2>/dev/null || echo '{"error":"API request failed"}'
 }
 
 api_post() {
     curl -s -X POST "${API_BASE}$1" \
         -H "Content-Type: application/json" \
-        -d "$2" | python3 -m json.tool 2>/dev/null || echo "Error: API request failed"
+        -d "$2" 2>/dev/null || echo '{"error":"API request failed"}'
 }
 
 api_put() {
     curl -s -X PUT "${API_BASE}$1" \
         -H "Content-Type: application/json" \
-        -d "$2" | python3 -m json.tool 2>/dev/null || echo "Error: API request failed"
-}
-
-api_delete() {
-    curl -s -X DELETE "${API_BASE}$1" | python3 -m json.tool 2>/dev/null || echo "Error: API request failed"
+        -d "$2" 2>/dev/null || echo '{"error":"API request failed"}'
 }
 
 api_delete_no_body() {
@@ -46,24 +42,68 @@ api_delete_no_body() {
     fi
 }
 
-format_money() {
-    printf "$%,.2f" "$1"
-}
-
 # Commands
 cmd_summary() {
-    echo -e "${BLUE}=== 资产总览 ===${NC}"
-    api_get "/api/dashboard"
+    local data
+    data=$(api_get "/api/dashboard")
+    python3 - "$data" << 'PYEOF'
+import sys, json
+d = json.loads(sys.argv[1])
+ta = d.get("total_assets", {})
+p = d.get("portfolio", {})
+cash = d.get("cash_accounts", [])
+
+print("=== 资产总览 ===")
+print(f"总资产:   ${ta.get('total_assets_usd',0):,.0f} USD (汇率 {ta.get('usd_to_cny',7.2)})")
+print(f"股票市值: ${ta.get('stock_value_usd',0):,.0f} USD")
+print(f"美元现金: ${ta.get('cash_usd',0):,.0f} USD")
+print(f"人民币现金: ¥{ta.get('cash_cny',0):,.0f} CNY")
+print()
+print("=== 持仓 ===")
+for h in p.get("holdings", []):
+    pnl = h.get("pnl_pct", 0)
+    sign = "+" if pnl >= 0 else ""
+    curr = "¥" if h.get("currency") == "CNY" else "$"
+    print(f"  {h['symbol']} {h['name']}: {h['shares']}股 成本{curr}{h['avg_cost']:.2f} 现价{curr}{h.get('current_price',0):.2f} {sign}{pnl:.1f}%")
+print()
+total_pnl = p.get("total_pnl_pct", 0)
+sign = "+" if total_pnl >= 0 else ""
+print(f"股票合计盈亏: {sign}{total_pnl:.1f}%  (${p.get('total_pnl',0):+,.0f})")
+PYEOF
 }
 
 cmd_holdings() {
-    echo -e "${BLUE}=== 持仓明细 ===${NC}"
-    api_get "/api/portfolio"
+    local data
+    data=$(api_get "/api/portfolio")
+    python3 - "$data" << 'PYEOF'
+import sys, json
+d = json.loads(sys.argv[1])
+print("=== 持仓明细 ===")
+for h in d.get("holdings", []):
+    pnl = h.get("pnl_pct", 0)
+    sign = "+" if pnl >= 0 else ""
+    curr = "¥" if h.get("currency") == "CNY" else "$"
+    mv = h.get("market_value", 0)
+    upnl = h.get("unrealized_pnl", 0)
+    print(f"  {h['symbol']} ({h['name']})")
+    print(f"    股数: {h['shares']}  成本: {curr}{h['avg_cost']:.2f}  现价: {curr}{h.get('current_price',0):.2f}")
+    print(f"    市值: {curr}{mv:,.2f}  盈亏: {curr}{upnl:+,.2f} ({sign}{pnl:.1f}%)")
+print()
+print(f"总成本: ${d.get('total_cost',0):,.2f}  总市值: ${d.get('total_value',0):,.2f}  总盈亏: ${d.get('total_pnl',0):+,.2f} ({d.get('total_pnl_pct',0):+.1f}%)")
+PYEOF
 }
 
 cmd_cash() {
-    echo -e "${BLUE}=== 现金账户 ===${NC}"
-    api_get "/api/cash"
+    local data
+    data=$(api_get "/api/cash")
+    python3 - "$data" << 'PYEOF'
+import sys, json
+d = json.loads(sys.argv[1])
+print("=== 现金账户 ===")
+for c in d:
+    curr_sym = "¥" if c["currency"] == "CNY" else "$"
+    print(f"  {c['currency']}: {curr_sym}{c['balance']:,.2f}")
+PYEOF
 }
 
 cmd_buy() {
@@ -78,10 +118,10 @@ cmd_buy() {
     fi
     
     local amount=$(echo "$shares * $price" | bc -l)
-    
     echo -e "${YELLOW}买入 $symbol: $shares 股 @ \$$price${NC}"
     
-    api_post "/api/transactions" "{
+    local resp
+    resp=$(api_post "/api/transactions" "{
         \"symbol\": \"$symbol\",
         \"name\": \"$symbol\",
         \"action\": \"buy\",
@@ -91,7 +131,8 @@ cmd_buy() {
         \"fee\": 0,
         \"date\": \"$(date -u +%Y-%m-%dT%H:%M:%S)\",
         \"notes\": \"$note\"
-    }"
+    }")
+    python3 -c "import sys,json; d=json.loads(sys.argv[1]); print('✅ 买入成功' if 'id' in d else f'❌ 失败: {d}')" "$resp"
 }
 
 cmd_sell() {
@@ -106,10 +147,10 @@ cmd_sell() {
     fi
     
     local amount=$(echo "$shares * $price" | bc -l)
-    
     echo -e "${YELLOW}卖出 $symbol: $shares 股 @ \$$price${NC}"
     
-    api_post "/api/transactions" "{
+    local resp
+    resp=$(api_post "/api/transactions" "{
         \"symbol\": \"$symbol\",
         \"name\": \"$symbol\",
         \"action\": \"sell\",
@@ -119,11 +160,30 @@ cmd_sell() {
         \"fee\": 0,
         \"date\": \"$(date -u +%Y-%m-%dT%H:%M:%S)\",
         \"notes\": \"$note\"
-    }"
+    }")
+    python3 -c "import sys,json; d=json.loads(sys.argv[1]); print('✅ 卖出成功' if 'id' in d else f'❌ 失败: {d}')" "$resp"
 }
 
 cmd_watch() {
-    api_get "/api/watchlist"
+    local data
+    data=$(api_get "/api/watchlist")
+    python3 - "$data" << 'PYEOF'
+import sys, json
+d = json.loads(sys.argv[1])
+print("=== 监控列表 ===")
+for w in d:
+    curr = "¥" if w.get("currency") == "CNY" else "$"
+    price = w.get("current_price", 0)
+    chg = w.get("change_pct", 0)
+    sign = "+" if chg >= 0 else ""
+    parts = []
+    if w.get("target_buy"): parts.append(f"买入{curr}{w['target_buy']}")
+    if w.get("target_sell"): parts.append(f"卖出{curr}{w['target_sell']}")
+    if w.get("stop_loss"): parts.append(f"止损{curr}{w['stop_loss']}")
+    targets = "  ".join(parts) if parts else "无档位"
+    status = "" if w.get("enabled") else " [已暂停]"
+    print(f"  {w['symbol']} {w['name']}{status}: 现价{curr}{price:.2f} ({sign}{chg:.2f}%)  {targets}")
+PYEOF
 }
 
 cmd_watch_add() {
@@ -135,7 +195,6 @@ cmd_watch_add() {
         exit 1
     fi
     
-    # Parse optional flags
     shift; shift 2>/dev/null
     local target_buy="null"
     local target_sell="null"
@@ -149,25 +208,24 @@ cmd_watch_add() {
         esac
     done
     
-    api_post "/api/watchlist" "{
+    local resp
+    resp=$(api_post "/api/watchlist" "{
         \"symbol\": \"$symbol\",
         \"name\": \"${name:-$symbol}\",
         \"target_buy\": $target_buy,
         \"target_sell\": $target_sell,
         \"stop_loss\": $stop_loss,
         \"enabled\": true
-    }"
+    }")
+    python3 -c "import sys,json; d=json.loads(sys.argv[1]); print('✅ 已添加监控' if 'id' in d else f'❌ 失败: {d}')" "$resp"
 }
 
 cmd_watch_delete() {
     local symbol=$1
-    
     if [[ -z "$symbol" ]]; then
         echo "Usage: portfolio watch-delete <symbol>"
-        echo "Example: portfolio watch-delete MSFT"
         exit 1
     fi
-    
     symbol=$(echo "$symbol" | tr '[:lower:]' '[:upper:]')
     echo -e "${YELLOW}删除监控: $symbol${NC}"
     api_delete_no_body "/api/watchlist/symbol/$symbol"
@@ -175,17 +233,13 @@ cmd_watch_delete() {
 
 cmd_watch_update() {
     local symbol=$1
-    
     if [[ -z "$symbol" ]]; then
-        echo "Usage: portfolio watch-update <symbol> [--buy price] [--sell price] [--stop price] [--name name] [--enable|--disable]"
-        echo "Example: portfolio watch-update MSFT --buy 395 --sell 450 --stop 350"
+        echo "Usage: portfolio watch-update <symbol> [--buy p] [--sell p] [--stop p] [--name n] [--enable|--disable]"
         exit 1
     fi
-    
     symbol=$(echo "$symbol" | tr '[:lower:]' '[:upper:]')
     shift
-    
-    # Parse flags — build JSON payload with only provided fields
+
     local json_parts=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -201,35 +255,50 @@ cmd_watch_update() {
             *) echo "Unknown option: $1"; exit 1;;
         esac
     done
-    
+
     if [[ ${#json_parts[@]} -eq 0 ]]; then
-        echo "Error: At least one option required (--buy, --sell, --stop, --name, --enable, --disable, --clear-buy, --clear-sell, --clear-stop)"
+        echo "Error: At least one option required"
         exit 1
     fi
-    
-    # Join JSON parts with commas
-    local json_body="{"
-    local first=true
+
+    local json_body="{"; local first=true
     for part in "${json_parts[@]}"; do
-        if $first; then
-            json_body+="$part"
-            first=false
-        else
-            json_body+=", $part"
-        fi
+        if $first; then json_body+="$part"; first=false
+        else json_body+=", $part"; fi
     done
     json_body+="}"
-    
-    echo -e "${YELLOW}更新监控: $symbol${NC}"
-    api_put "/api/watchlist/$symbol" "$json_body"
+
+    local resp
+    resp=$(api_put "/api/watchlist/$symbol" "$json_body")
+    python3 -c "import sys,json; d=json.loads(sys.argv[1]); print('✅ 已更新' if 'id' in d else f'❌ 失败: {d}')" "$resp"
 }
 
 cmd_alerts() {
-    api_get "/api/alerts/history"
+    local data
+    data=$(api_get "/api/alerts/history")
+    python3 - "$data" << 'PYEOF'
+import sys, json
+d = json.loads(sys.argv[1])
+alerts = d if isinstance(d, list) else d.get("items", [])
+print("=== 告警历史（最近10条）===")
+for a in alerts[:10]:
+    status = "✅" if a.get("sent") else "❌"
+    print(f"  {status} {a['symbol']} {a.get('alert_type','')} ${a.get('price',0):.2f}  {a.get('triggered_at','')[:16]}")
+PYEOF
 }
 
 cmd_transactions() {
-    api_get "/api/transactions"
+    local data
+    data=$(api_get "/api/transactions")
+    python3 - "$data" << 'PYEOF'
+import sys, json
+d = json.loads(sys.argv[1])
+txs = d if isinstance(d, list) else d.get("items", [])
+print("=== 交易记录（最近10条）===")
+for t in txs[:10]:
+    action = "买入" if t.get("action") == "buy" else "卖出"
+    print(f"  {t.get('date','')[:10]} {action} {t['symbol']} {t['shares']}股 @ ${t['price']:.2f}  备注: {t.get('notes','')}")
+PYEOF
 }
 
 cmd_help() {
@@ -239,79 +308,37 @@ cmd_help() {
 Usage: portfolio [command] [options]
 
 Commands:
-  summary                 资产总览
-  holdings               持仓明细
-  cash                   现金账户
-  buy <symbol> <shares> <price> [note]   买入
-  sell <symbol> <shares> <price> [note]  卖出
-  transactions           交易记录
-  watch                  监控列表
+  summary                                              资产总览
+  holdings                                             持仓明细
+  cash                                                 现金账户
+  buy <symbol> <shares> <price> [note]                 买入
+  sell <symbol> <shares> <price> [note]                卖出
+  transactions                                         交易记录
+  watch                                                监控列表
   watch-add <symbol> [name] [--buy p] [--sell p] [--stop p]   添加监控
   watch-update <symbol> [--buy p] [--sell p] [--stop p]       修改档位
   watch-delete <symbol>                                        删除监控
-  alerts                 告警历史
-  help                   显示帮助
+  alerts                                               告警历史
+  help                                                 显示帮助
 
 Environment:
-  PORTFOLIO_API_URL      API地址 (默认: http://localhost:18890)
-
-Examples:
-  portfolio summary
-  portfolio buy GOOGL 100 303.00 "建仓"
-  portfolio sell TME 1000 15.50 "止盈"
-  portfolio watch-add MSFT "微软" --buy 395 --sell 450 --stop 350
-  portfolio watch-update MSFT --buy 380 --sell 460
-  portfolio watch-update MSFT --clear-buy              # 清除买入档位
-  portfolio watch-delete MSFT
+  PORTFOLIO_API_URL    API地址 (默认: http://localhost:8802)
 EOF
 }
 
 # Main
 case "${1:-help}" in
-    summary)
-        cmd_summary
-        ;;
-    holdings)
-        cmd_holdings
-        ;;
-    cash)
-        cmd_cash
-        ;;
-    buy)
-        shift
-        cmd_buy "$@"
-        ;;
-    sell)
-        shift
-        cmd_sell "$@"
-        ;;
-    transactions)
-        cmd_transactions
-        ;;
-    watch)
-        cmd_watch
-        ;;
-    watch-add)
-        shift
-        cmd_watch_add "$@"
-        ;;
-    watch-delete|watch-rm)
-        shift
-        cmd_watch_delete "$@"
-        ;;
-    watch-update)
-        shift
-        cmd_watch_update "$@"
-        ;;
-    alerts)
-        cmd_alerts
-        ;;
-    help|--help|-h)
-        cmd_help
-        ;;
-    *)
-        echo "Unknown command: $1"
-        cmd_help
-        exit 1
-        ;;
+    summary)     cmd_summary ;;
+    holdings)    cmd_holdings ;;
+    cash)        cmd_cash ;;
+    buy)         shift; cmd_buy "$@" ;;
+    sell)        shift; cmd_sell "$@" ;;
+    transactions) cmd_transactions ;;
+    watch)       cmd_watch ;;
+    watch-add)   shift; cmd_watch_add "$@" ;;
+    watch-delete|watch-rm) shift; cmd_watch_delete "$@" ;;
+    watch-update) shift; cmd_watch_update "$@" ;;
+    alerts)      cmd_alerts ;;
+    help|--help|-h) cmd_help ;;
+    *) echo "Unknown command: $1"; cmd_help; exit 1 ;;
 esac
