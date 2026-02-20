@@ -1,0 +1,51 @@
+# 股票监控与交易记录系统配置
+
+server:
+  host: "0.0.0.0"
+  port: 8802
+
+database:
+  url: "sqlite:///data/portfolio.db"
+
+# 监控配置
+monitor:
+  # 价格刷新间隔（秒）- 美股盘中30秒，盘外5分钟
+  interval_active: 30
+  interval_idle: 300
+  # 单日涨跌幅告警阈值（百分比）
+  change_alert_pct: 5.0
+
+# Telegram 推送配置（直接调用 Bot API）
+telegram:
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"       # 从 @BotFather 获取
+  chat_id: "YOUR_CHAT_ID"                     # 群组/频道 ID（负数），或个人 ID
+  thread_id: 2                                 # Forum 群组的话题 ID（非 Forum 群可删除此行）
+
+# 告警设置
+alert:
+  # 同一告警冷却时间（秒），避免重复推送
+  cooldown: 3600
+
+# 默认监控标的（可通过 Web 界面增删）
+watchlist:
+  - symbol: GOOGL
+    name: "谷歌"
+    market: us
+  - symbol: MSFT
+    name: "微软"
+    market: us
+  - symbol: NVDA
+    name: "英伟达"
+    market: us
+  - symbol: META
+    name: "Meta"
+    market: us
+  - symbol: TME
+    name: "腾讯音乐"
+    market: us
+  - symbol: BABA
+    name: "阿里巴巴"
+    market: us
+  - symbol: "510300.SS"
+    name: "沪深300ETF"
+    market: cn
