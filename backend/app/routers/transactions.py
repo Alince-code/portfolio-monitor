@@ -138,10 +138,28 @@ def get_transaction(tx_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/{tx_id}", status_code=204)
 def delete_transaction(tx_id: str, db: Session = Depends(get_db)):
-    """Delete a transaction."""
+    """Delete a transaction and reverse its cash impact."""
     tx = db.query(Transaction).filter(Transaction.id == tx_id).first()
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Reverse cash balance: buy→refund, sell→deduct
+    try:
+        currency = get_currency_for_symbol(tx.symbol, db)
+        account = db.query(CashAccount).filter(CashAccount.currency == currency).first()
+        if account:
+            if tx.action == TradeAction.buy:
+                # Refund: return amount + fee
+                account.balance += (tx.amount + tx.fee)
+            elif tx.action == TradeAction.sell:
+                # Reverse sell proceeds: deduct amount - fee
+                account.balance -= (tx.amount - tx.fee)
+            account.updated_at = utcnow()
+    except Exception as e:
+        # Cash adjustment failure should not block transaction deletion
+        import logging
+        logging.getLogger(__name__).warning(f"Cash rollback failed for tx {tx_id}: {e}")
+
     db.delete(tx)
     db.commit()
 

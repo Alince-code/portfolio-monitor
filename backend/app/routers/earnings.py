@@ -116,7 +116,7 @@ def _fetch_earnings_data(symbols: List[Dict[str, str]]) -> Dict[str, List[Earnin
             for ed_obj in earnings_dates:
                 raw_ts = ed_obj.get("raw")
                 if raw_ts:
-                    ed = datetime.utcfromtimestamp(raw_ts).date()
+                    ed = datetime.fromtimestamp(raw_ts, tz=timezone.utc).date()
                     days_until = (ed - today).days
                     if -7 <= days_until <= 90:
                         items_upcoming.append(EarningsItem(
@@ -136,7 +136,7 @@ def _fetch_earnings_data(symbols: List[Dict[str, str]]) -> Dict[str, List[Earnin
                 estimate_raw = entry.get("epsEstimate", {}).get("raw")
 
                 if q_date:
-                    report_date = datetime.utcfromtimestamp(q_date).date()
+                    report_date = datetime.fromtimestamp(q_date, tz=timezone.utc).date()
                 else:
                     report_date = None
 

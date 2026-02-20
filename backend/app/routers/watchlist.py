@@ -105,7 +105,10 @@ def get_watchlist(db: Session = Depends(get_db)):
 def add_to_watchlist(payload: WatchlistAddRequest, db: Session = Depends(get_db)):
     """Add or update a stock in watchlist."""
     symbol = payload.symbol.upper()
-    existing = db.query(AlertSetting).filter(AlertSetting.symbol == symbol).first()
+    existing = db.query(AlertSetting).filter(
+        AlertSetting.symbol == symbol,
+        AlertSetting.is_primary == True,
+    ).first()
 
     if existing:
         # Update existing entry

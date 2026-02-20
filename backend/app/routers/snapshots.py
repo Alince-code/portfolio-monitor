@@ -13,13 +13,11 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import AssetSnapshot, CashAccount, PriceCache
 from ..services.portfolio_service import get_holdings
+from ..services.exchange_service import get_usd_to_cny
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/snapshots", tags=["snapshots"])
-
-# Exchange rate fallback
-USD_TO_CNY = 7.2
 
 
 class SnapshotOut(BaseModel):
@@ -97,11 +95,12 @@ def take_daily_snapshot():
                     stock_value_usd += h.market_value
                 details_parts.append(f"{h.symbol}:{h.market_value:.0f}")
 
+        usd_to_cny = get_usd_to_cny()
         total_assets_usd = (
             stock_value_usd
             + cash_usd
-            + (stock_value_cny / USD_TO_CNY)
-            + (cash_cny / USD_TO_CNY)
+            + (stock_value_cny / usd_to_cny)
+            + (cash_cny / usd_to_cny)
         )
 
         snapshot = AssetSnapshot(

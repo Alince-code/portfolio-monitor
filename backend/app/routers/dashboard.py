@@ -14,40 +14,10 @@ from ..models import (
     DashboardOut, PriceOut, AlertHistoryOut, TransactionOut, CashAccountOut, TotalAssetsOut,
 )
 from ..services.portfolio_service import get_holdings
+from ..services.exchange_service import get_usd_to_cny as _get_usd_to_cny
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
-
-# Exchange rate with cache
-_fx_cache: dict = {"rate": 7.2, "ts": 0}
-_FX_CACHE_TTL = 300  # 5 minutes
-
-
-def _get_usd_to_cny() -> float:
-    """Fetch real-time USD/CNY rate from Yahoo Finance, with cache."""
-    global _fx_cache
-    now = time.time()
-    if now - _fx_cache["ts"] < _FX_CACHE_TTL:
-        return _fx_cache["rate"]
-
-    try:
-        from curl_cffi import requests as cffi_requests
-        session = cffi_requests.Session(impersonate="chrome")
-        url = "https://query2.finance.yahoo.com/v8/finance/chart/CNY=X"
-        resp = session.get(url, params={"range": "1d", "interval": "1d"}, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            result = data.get("chart", {}).get("result", [{}])[0]
-            meta = result.get("meta", {})
-            rate = meta.get("regularMarketPrice")
-            if rate and 5 < rate < 10:  # Sanity check
-                _fx_cache["rate"] = round(rate, 4)
-                _fx_cache["ts"] = now
-                logger.info(f"FX rate updated: USD/CNY = {_fx_cache['rate']}")
-    except Exception as e:
-        logger.warning(f"FX rate fetch error: {e}")
-
-    return _fx_cache["rate"]
 
 
 @router.get("", response_model=DashboardOut)
@@ -77,13 +47,17 @@ def dashboard(db: Session = Depends(get_db)):
     cash_usd = cash_map.get("USD", 0.0)
     cash_cny = cash_map.get("CNY", 0.0)
 
-    # Separate stock values by currency
+    # Separate stock values by currency — batch query to avoid N+1
     stock_value_usd = 0.0
     stock_value_cny = 0.0
     if portfolio and portfolio.holdings:
+        holding_symbols = [h.symbol for h in portfolio.holdings]
+        price_map = {
+            p.symbol: p
+            for p in db.query(PriceCache).filter(PriceCache.symbol.in_(holding_symbols)).all()
+        }
         for h in portfolio.holdings:
-            # Check if the symbol is a CN stock
-            cached = db.query(PriceCache).filter(PriceCache.symbol == h.symbol).first()
+            cached = price_map.get(h.symbol)
             if cached and cached.currency == "CNY":
                 stock_value_cny += h.market_value
             else:

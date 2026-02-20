@@ -29,11 +29,14 @@ COPY backend/ ./backend/
 # 拷贝前端构建产物
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
 
-# 拷贝配置（config.yaml 会被 volume 覆盖，这里只是占位）
-COPY config.yaml ./
+# 拷贝配置模板（运行时由 docker-compose volume 挂载真实 config.yaml 覆盖）
+COPY config.example.yaml ./config.yaml
 
 # 数据目录（挂载 volume 后持久化）
 RUN mkdir -p data
+
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8802
 

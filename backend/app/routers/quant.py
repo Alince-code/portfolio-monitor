@@ -10,33 +10,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..models import QuantSignal, QuantSignalOut, QuantSignalSummary, AlertSetting
 
 logger = logging.getLogger("quant")
 
 router = APIRouter(prefix="/api/quant", tags=["quant"])
 
-# Symbol name mapping
-SYMBOL_NAMES = {
-    "BABA": "阿里巴巴",
-    "TME": "腾讯音乐",
-    "GOOGL": "谷歌",
-    "MSFT": "微软",
-    "NVDA": "英伟达",
-    "META": "Meta",
-    "510300.SS": "沪深300ETF",
-}
 
-SYMBOL_MARKETS = {
-    "BABA": "us",
-    "TME": "us",
-    "GOOGL": "us",
-    "MSFT": "us",
-    "NVDA": "us",
-    "META": "us",
-    "510300.SS": "cn",
-}
+def _get_symbol_mappings(db: Session) -> tuple[dict[str, str], dict[str, str]]:
+    """Build symbol→name and symbol→market mappings from AlertSetting (primary only)."""
+    alerts = db.query(AlertSetting).filter(AlertSetting.is_primary == True).all()
+    names = {a.symbol: a.name for a in alerts}
+    markets = {a.symbol: a.market.value for a in alerts}
+    return names, markets
 
 # Metric weights for composite score (lower percentile = cheaper = higher score)
 METRIC_WEIGHTS = {
@@ -91,6 +78,9 @@ def get_all_signals(db: Session = Depends(get_db)):
     if not symbol_list:
         return []
     
+    # Dynamic symbol mappings from DB
+    symbol_names, symbol_markets = _get_symbol_mappings(db)
+    
     results = []
     for symbol in sorted(symbol_list):
         # Get latest entry for each metric
@@ -114,8 +104,8 @@ def get_all_signals(db: Session = Depends(get_db)):
         
         results.append(QuantSignalSummary(
             symbol=symbol,
-            name=SYMBOL_NAMES.get(symbol, symbol),
-            market=SYMBOL_MARKETS.get(symbol, "us"),
+            name=symbol_names.get(symbol, symbol),
+            market=symbol_markets.get(symbol, "us"),
             metrics=metrics,
             score=score,
         ))
@@ -143,14 +133,6 @@ def get_symbol_signals(symbol: str, metric: Optional[str] = None, db: Session = 
 @router.post("/refresh")
 def refresh_signals(db: Session = Depends(get_db)):
     """Manually trigger a data refresh — runs synchronously and returns result."""
-    import sys
-    import os
-    # 确保 scripts 目录在 path 里
-    scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts')
-    scripts_dir = os.path.abspath(scripts_dir)
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    
     try:
         from fetch_fundamentals import refresh_all_signals
         count = refresh_all_signals()

@@ -147,18 +147,24 @@ async def lifespan(app: FastAPI):
     init_db()
     seed_default_alerts()
 
+    # Add backend/scripts/ to sys.path once (used by quant refresh)
+    import sys
+    scripts_dir = str(Path(__file__).parent.parent / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+
     # Start background scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
-    scheduler.add_job(update_prices, "interval", seconds=60, id="price_updater",
+    price_interval = _CONFIG.get("monitor", {}).get("interval_active", 60)
+    scheduler.add_job(update_prices, "interval", seconds=price_interval, id="price_updater",
+                      max_instances=1,
                       next_run_time=datetime.now())  # Run immediately on start
     
     # Quant signals refresh — daily at 16:00 CST (08:00 UTC)
     def refresh_quant_signals():
         try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).parent.parent))
-            from scripts.fetch_fundamentals import refresh_all_signals
+            from fetch_fundamentals import refresh_all_signals
             refresh_all_signals()
         except Exception as e:
             logger.error(f"Quant signal refresh error: {e}")
@@ -176,7 +182,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(daily_snapshot, "cron", hour=8, minute=5, id="daily_snapshot")
     
     scheduler.start()
-    logger.info("🚀 Portfolio Monitor started — price updater running every 60s, quant refresh daily at 16:00 CST, daily snapshot at 16:05 CST")
+    logger.info(f"🚀 Portfolio Monitor started — price updater running every {price_interval}s, quant refresh daily at 16:00 CST, daily snapshot at 16:05 CST")
 
     yield
 
@@ -211,17 +217,23 @@ app.add_middleware(
 
 import hashlib
 import hmac
+import re as _re
 import urllib.parse
 import yaml as _yaml
 
-def _get_bot_token() -> str:
+# ── Load config once at module level ──────────────────────────────────────────
+def _load_config() -> dict:
     try:
         cfg_path = Path(__file__).parent.parent.parent / "config.yaml"
         with open(cfg_path) as f:
-            cfg = _yaml.safe_load(f)
-        return cfg.get("telegram", {}).get("bot_token", "")
+            return _yaml.safe_load(f) or {}
     except Exception:
-        return ""
+        return {}
+
+_CONFIG = _load_config()
+
+def _get_bot_token() -> str:
+    return _CONFIG.get("telegram", {}).get("bot_token", "")
 
 def _verify_telegram_init_data(init_data: str, bot_token: str) -> bool:
     """验证 Telegram WebApp initData 签名。"""
@@ -254,7 +266,6 @@ class TelegramAuthMiddleware(BaseHTTPMiddleware):
 
         # localhost 或 IP 直连放行（内网/VPN 直接访问无需 Telegram 鉴权）
         host_only = host.split(":")[0]
-        import re as _re
         _is_ip = _re.match(r'^(\d{1,3}\.){3}\d{1,3}$', host_only)
         if "localhost" in host_only or "127.0.0.1" in host_only or _is_ip:
             return await call_next(request)

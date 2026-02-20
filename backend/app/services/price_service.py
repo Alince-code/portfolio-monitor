@@ -99,14 +99,30 @@ def fetch_cn_price(symbol: str) -> Dict[str, Any]:
 
 
 def fetch_prices_batch(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Fetch prices for multiple symbols with delays.
+    """Fetch prices for multiple symbols with concurrent batches.
+
+    Uses ThreadPoolExecutor with max_workers=3 to fetch in parallel.
+    Adds 1s sleep between batches to avoid rate limits.
 
     Returns a dict keyed by symbol.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     results = {}
-    for i, symbol in enumerate(symbols):
-        if i > 0:
-            time.sleep(1.5)  # Delay between requests to avoid rate limits
-        data = fetch_price(symbol)
-        results[symbol] = data
+    batch_size = 3
+
+    for batch_start in range(0, len(symbols), batch_size):
+        if batch_start > 0:
+            time.sleep(1)  # Inter-batch delay to avoid rate limits
+
+        batch = symbols[batch_start:batch_start + batch_size]
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(fetch_price, sym): sym for sym in batch}
+            for future in as_completed(futures):
+                sym = futures[future]
+                try:
+                    results[sym] = future.result()
+                except Exception as e:
+                    results[sym] = {"symbol": sym, "error": str(e)}
+
     return results

@@ -14,10 +14,9 @@ from ..models import (
     HoldingOut, PortfolioOut,
 )
 
-logger = logging.getLogger(__name__)
+from .exchange_service import get_usd_to_cny
 
-# Exchange rate (same as dashboard.py; in production fetch from API)
-USD_TO_CNY = 7.2
+logger = logging.getLogger(__name__)
 
 
 def get_holdings(db: Session) -> PortfolioOut:
@@ -70,9 +69,10 @@ def get_holdings(db: Session) -> PortfolioOut:
         pnl_pct = (unrealized_pnl / pos["total_cost"] * 100) if pos["total_cost"] > 0 else 0.0
 
         # Convert to USD for unified comparison
+        usd_to_cny = get_usd_to_cny()
         if currency == "CNY":
-            market_value_usd = market_value / USD_TO_CNY
-            unrealized_pnl_usd = unrealized_pnl / USD_TO_CNY
+            market_value_usd = market_value / usd_to_cny
+            unrealized_pnl_usd = unrealized_pnl / usd_to_cny
         else:
             market_value_usd = market_value
             unrealized_pnl_usd = unrealized_pnl

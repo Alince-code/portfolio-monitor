@@ -29,9 +29,9 @@ COOLDOWN_SECONDS = 3600  # 1 hour
 
 _config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
 
-
-def _load_telegram_config() -> dict:
-    """Load telegram config from config.yaml."""
+# Load telegram config once at module level
+def _load_telegram_config_once() -> dict:
+    """Load telegram config from config.yaml (called once at import time)."""
     try:
         with open(_config_path) as f:
             cfg = yaml.safe_load(f)
@@ -39,6 +39,13 @@ def _load_telegram_config() -> dict:
     except Exception as e:
         logger.error(f"Failed to load telegram config: {e}")
         return {}
+
+_TELEGRAM_CONFIG = _load_telegram_config_once()
+
+
+def _load_telegram_config() -> dict:
+    """Return cached telegram config."""
+    return _TELEGRAM_CONFIG
 
 
 def _alert_key(alert_id: int, alert_type: str) -> str:

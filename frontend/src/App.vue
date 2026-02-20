@@ -60,7 +60,7 @@ const showAddAlert = ref(false)
 const showAddTx = ref(false)
 const historyFilter = ref('')
 
-const alertViewMode = ref(localStorage.getItem('alertViewMode') || 'zone')
+const alertViewMode = ref(localStorage.getItem('alertViewMode') || 'card')
 function setAlertViewMode(mode) {
   alertViewMode.value = mode
   localStorage.setItem('alertViewMode', mode)
