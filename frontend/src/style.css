@@ -269,6 +269,55 @@ body {
 .asset-value { font-family: 'SF Mono', monospace; font-size: 15px; font-weight: 600; }
 .asset-value.highlight { font-size: 22px; color: var(--green); font-weight: 700; }
 
+/* ═══════════ Cash Page ═══════════ */
+.cash-overview {
+  display: grid; grid-template-columns: auto 1fr; gap: 16px; margin-bottom: 16px; align-items: stretch;
+}
+.cash-pie-card { display: flex; flex-direction: column; justify-content: center; }
+.cash-pie-card { padding: 16px; }
+.cash-pie-wrap { display: flex; align-items: center; gap: 20px; }
+.cash-pie-svg { flex-shrink: 0; }
+.cash-pie-legend { display: flex; flex-direction: column; gap: 8px; }
+.pie-legend-item { display: flex; align-items: center; gap: 6px; }
+.pie-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.pie-label { font-size: 12px; color: var(--text-dim); min-width: 64px; }
+.pie-pct { font-size: 12px; font-weight: 600; color: var(--text); min-width: 32px; text-align: right; }
+.pie-val { font-size: 11px; color: var(--text-muted); }
+
+.cash-position-card { padding: 16px; }
+.position-bars { display: flex; flex-direction: column; gap: 12px; }
+.position-bar-item {}
+.position-bar-header { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.position-bar-label { font-size: 13px; color: var(--text-dim); flex: 1; }
+.position-bar-pct { font-size: 13px; font-weight: 600; color: var(--text); min-width: 36px; text-align: right; }
+.position-bar-val { font-size: 11px; color: var(--text-muted); min-width: 80px; text-align: right; }
+.position-bar-track { height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+.position-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+.position-hint { font-size: 12px; color: var(--text-muted); padding-top: 4px; }
+
+.summary-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* 操作日志 */
+.cash-log-list { display: flex; flex-direction: column; }
+.cash-log-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
+  transition: background 0.15s;
+}
+.cash-log-row:last-child { border-bottom: none; }
+.cash-log-row:hover { background: var(--bg-hover); }
+.cash-log-icon { font-size: 14px; flex-shrink: 0; }
+.cash-log-currency { font-size: 11px; color: var(--text-muted); background: var(--bg-input); padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+.cash-log-amount { font-size: 14px; font-weight: 600; min-width: 90px; }
+.cash-log-after { font-size: 12px; color: var(--text-dim); }
+.cash-log-note { flex: 1; font-size: 12px; color: var(--text-dim); background: var(--bg-input); padding: 2px 8px; border-radius: 4px; }
+.cash-log-date { font-size: 11px; color: var(--text-muted); margin-left: auto; flex-shrink: 0; }
+
+@media (max-width: 768px) {
+  .cash-overview { grid-template-columns: 1fr; }
+  .cash-pie-wrap { flex-direction: column; align-items: flex-start; }
+}
+
 /* ═══════════ Market Sections (Alerts) ═══════════ */
 .market-block { margin-bottom: 20px; }
 .market-section-header {
@@ -509,6 +558,85 @@ body {
   padding: 10px 16px; border-top: 1px solid var(--border);
   background: var(--bg-hover);
   margin-top: auto;
+}
+
+/* ═══════════ Transaction Timeline ═══════════ */
+.tx-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;
+}
+.tx-stat-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+  text-align: center;
+}
+.tx-stat-card.buy { border-left: 3px solid var(--green); }
+.tx-stat-card.sell { border-left: 3px solid var(--red); }
+.tx-stat-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.tx-stat-value { font-size: 16px; font-weight: 600; color: var(--text); font-family: monospace; }
+
+.tx-timeline { padding: 8px 16px 16px; }
+
+.tx-day-group { position: relative; padding-left: 20px; margin-bottom: 4px; }
+.tx-day-group::before {
+  content: ''; position: absolute; left: 7px; top: 28px; bottom: 0;
+  width: 2px; background: var(--border);
+}
+.tx-day-group:last-child::before { display: none; }
+
+.tx-day-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 0 8px; position: relative;
+}
+.tx-day-dot {
+  position: absolute; left: -16px; top: 50%; transform: translateY(-50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--blue); border: 2px solid var(--bg-card);
+  box-shadow: 0 0 0 2px var(--blue);
+}
+.tx-day-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.tx-day-count { font-size: 11px; color: var(--text-muted); background: var(--bg-hover); padding: 2px 6px; border-radius: 10px; }
+
+.tx-day-items { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; }
+
+.tx-item {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-hover); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px;
+  transition: border-color 0.15s;
+}
+.tx-item:hover { border-color: var(--border-light); }
+
+.tx-item-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-buy { background: var(--green); }
+.dot-sell { background: var(--red); }
+
+.tx-item-body { flex: 1; min-width: 0; }
+.tx-item-main {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.tx-action-tag { font-size: 11px; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
+.tx-symbol { font-size: 14px; font-weight: 600; color: var(--text); }
+.tx-name { font-size: 13px; color: var(--text-dim); }
+.tx-shares { font-size: 13px; color: var(--text); }
+.tx-at { font-size: 12px; color: var(--text-muted); }
+.tx-price { font-size: 13px; color: var(--text); }
+
+.tx-item-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tx-amount { font-size: 14px; font-weight: 600; color: var(--text); }
+.tx-fee { font-size: 12px; color: var(--text-muted); }
+.tx-notes {
+  font-size: 12px; color: var(--text-dim);
+  background: var(--bg-input); padding: 2px 8px; border-radius: 4px;
+}
+.tx-del { flex-shrink: 0; opacity: 0.4; transition: opacity 0.15s; }
+.tx-item:hover .tx-del { opacity: 1; }
+
+@media (max-width: 768px) {
+  .tx-stats { grid-template-columns: repeat(2, 1fr); }
+  .tx-timeline { display: none; }
 }
 .build-progress { }
 .build-progress-label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 6px; }
@@ -1391,71 +1519,112 @@ body {
 }
 
 /* ═══════════ Earnings Calendar ═══════════ */
-.earnings-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* ═══════════ Earnings ═══════════ */
+.section-title {
+  font-size: 15px; font-weight: 600; color: var(--text);
+  margin-bottom: 12px; padding-left: 2px;
 }
-.earnings-item {
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-card);
-  transition: border-color 0.2s;
+
+/* 未来财报网格 */
+.earnings-upcoming-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;
+  margin-bottom: 8px;
 }
-.earnings-item:hover { border-color: var(--blue); }
-.earnings-item-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+.earnings-upcoming-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+  transition: all 0.2s; position: relative; overflow: hidden;
 }
-.earnings-stock {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.earnings-upcoming-card:hover { border-color: var(--border-light); box-shadow: var(--shadow-lg); }
+.earnings-upcoming-card.urgent {
+  border-color: var(--blue);
+  background: linear-gradient(135deg, var(--bg-card) 60%, rgba(88,166,255,0.06));
 }
-.earnings-date-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+.earnings-upcoming-card.soon { border-color: rgba(88,166,255,0.4); }
+
+.earnings-card-top {
+  display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;
 }
-.earnings-date {
-  font-family: SF Mono, JetBrains Mono, Fira Code, monospace;
-  font-size: 13px;
-  color: var(--text);
+.earnings-card-stock { display: flex; flex-direction: column; gap: 2px; }
+.earnings-card-symbol { font-size: 15px; font-weight: 700; color: var(--blue); }
+.earnings-card-name { font-size: 12px; color: var(--text-dim); }
+.earnings-card-countdown {
+  display: flex; flex-direction: column; align-items: center;
+  background: rgba(88,166,255,0.12); border-radius: 8px; padding: 4px 8px; min-width: 40px;
 }
-.earnings-countdown {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 600;
-  background: rgba(88, 166, 255, 0.15);
-  color: var(--blue);
+.countdown-num { font-size: 18px; font-weight: 700; color: var(--blue); line-height: 1.1; }
+.countdown-unit { font-size: 10px; color: var(--blue); opacity: 0.8; }
+.earnings-upcoming-card.urgent .earnings-card-countdown {
+  background: rgba(88,166,255,0.2);
 }
-.earnings-detail {
-  margin-top: 6px;
-  display: flex;
-  gap: 16px;
+.earnings-card-date { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+.earnings-card-estimates { display: flex; flex-direction: column; gap: 4px; }
+.earnings-estimate-row { display: flex; justify-content: space-between; align-items: center; }
+.estimate-label { font-size: 11px; color: var(--text-dim); }
+.estimate-value { font-size: 12px; color: var(--text); }
+
+/* 最近财报 按股票分组 */
+.earnings-by-stock {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
 }
-.earnings-detail-item {
-  font-size: 12px;
-  color: var(--text-dim);
-  font-family: SF Mono, JetBrains Mono, Fira Code, monospace;
+@media (max-width: 768px) {
+  .earnings-by-stock { grid-template-columns: 1fr; }
 }
+.earnings-stock-group {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+.earnings-stock-group-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px; background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+.eps-sparkline-wrap {
+  margin-left: auto; display: flex; align-items: center; gap: 6px; cursor: default;
+}
+.eps-sparkline-label { font-size: 10px; color: var(--text-muted); }
+.eps-sparkline-svg { display: block; overflow: visible; }
+.earnings-record-list { display: flex; flex-direction: column; }
+.earnings-record-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.earnings-record-row:last-child { border-bottom: none; }
+.earnings-record-row:hover { background: var(--bg-hover); }
+.earnings-record-row.record-beat { border-left: 3px solid var(--green); }
+.earnings-record-row.record-miss { border-left: 3px solid var(--red); }
+.earnings-record-row.record-met { border-left: 3px solid var(--yellow); }
+
+.record-date { font-size: 13px; color: var(--text-dim); min-width: 90px; flex-shrink: 0; font-family: monospace; }
+.record-eps { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; }
+.record-eps-item { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.record-eps-item .eps-label { font-size: 11px; color: var(--text-muted); }
+.record-eps-arrow { font-size: 12px; color: var(--text-muted); }
+.record-diff {
+  font-size: 12px; font-weight: 700;
+  padding: 1px 7px; border-radius: 5px; background: var(--bg-input);
+}
+.eps-label { font-size: 10px; color: var(--text-muted); }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+.earnings-revenue { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+
 .earnings-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; flex-shrink: 0;
 }
 .earnings-badge.beat { background: rgba(63, 185, 80, 0.15); color: var(--green); }
 .earnings-badge.miss { background: rgba(248, 81, 73, 0.15); color: var(--red); }
 .earnings-badge.met { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
+.earnings-badge.muted { color: var(--text-muted); background: var(--bg-input); }
+
+@media (max-width: 768px) {
+  .earnings-upcoming-grid { grid-template-columns: repeat(2, 1fr); }
+  .earnings-record-row { gap: 8px; }
+  .record-date { min-width: 80px; font-size: 12px; }
+}
 
 /* ═══════════ Holding Build Progress (Portfolio Tab) ═══════════ */
 .holding-build-progress {

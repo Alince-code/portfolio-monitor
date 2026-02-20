@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import CashAccount, CashAccountOut, CashAccountUpdate, CurrencyType, gen_id, utcnow
+from ..models import (
+    CashAccount, CashAccountOut, CashAccountUpdate, CashAccountHistory,
+    CashLog, CurrencyType, gen_id, utcnow,
+)
 
 router = APIRouter(prefix="/api/cash", tags=["cash"])
 
@@ -17,8 +19,16 @@ router = APIRouter(prefix="/api/cash", tags=["cash"])
 @router.get("", response_model=List[CashAccountOut])
 def list_cash_accounts(db: Session = Depends(get_db)):
     """Get all cash account balances."""
-    accounts = db.query(CashAccount).all()
-    return accounts
+    return db.query(CashAccount).all()
+
+
+@router.get("/logs", response_model=List[CashAccountHistory])
+def list_cash_logs(currency: str = None, limit: int = 50, db: Session = Depends(get_db)):
+    """Get cash adjustment history."""
+    q = db.query(CashLog)
+    if currency:
+        q = q.filter(CashLog.currency == currency.upper())
+    return q.order_by(CashLog.created_at.desc()).limit(limit).all()
 
 
 @router.get("/{currency}", response_model=CashAccountOut)
@@ -33,30 +43,40 @@ def get_cash_account(currency: CurrencyType, db: Session = Depends(get_db)):
 @router.post("/adjust", response_model=CashAccountOut)
 def adjust_cash(payload: CashAccountUpdate, db: Session = Depends(get_db)):
     """Adjust cash balance (deposit or withdraw).
-    
+
     - amount > 0: deposit (存入)
     - amount < 0: withdraw (取出)
     """
     account = db.query(CashAccount).filter(CashAccount.currency == payload.currency.value).first()
-    
+
     if not account:
-        # Create new account if not exists
         account = CashAccount(
             currency=payload.currency.value,
-            balance=max(0.0, payload.amount),  # Can't have negative initial balance
+            balance=max(0.0, payload.amount),
             updated_at=utcnow(),
         )
         db.add(account)
+        new_balance = account.balance
     else:
         new_balance = account.balance + payload.amount
         if new_balance < 0:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Insufficient balance. Current: {account.balance}, Requested: {payload.amount}"
+                status_code=400,
+                detail=f"Insufficient balance. Current: {account.balance}, Requested: {payload.amount}",
             )
         account.balance = new_balance
         account.updated_at = utcnow()
-    
+
+    # 写操作日志
+    log = CashLog(
+        id=gen_id(),
+        currency=payload.currency.value,
+        amount=payload.amount,
+        balance_after=new_balance,
+        reason=payload.notes,
+        created_at=utcnow(),
+    )
+    db.add(log)
     db.commit()
     db.refresh(account)
     return account
@@ -67,7 +87,7 @@ def init_cash_accounts(db: Session = Depends(get_db)):
     """Initialize default cash accounts with zero balance."""
     currencies = [CurrencyType.usd, CurrencyType.cny]
     created = []
-    
+
     for curr in currencies:
         existing = db.query(CashAccount).filter(CashAccount.currency == curr.value).first()
         if not existing:
@@ -78,6 +98,6 @@ def init_cash_accounts(db: Session = Depends(get_db)):
             )
             db.add(account)
             created.append(curr.value)
-    
+
     db.commit()
     return {"message": f"Created cash accounts: {created}"}

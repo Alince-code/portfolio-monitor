@@ -146,6 +146,18 @@ class CashAccount(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class CashLog(Base):
+    """Cash adjustment history log."""
+    __tablename__ = "cash_logs"
+
+    id = Column(String(12), primary_key=True, default=gen_id)
+    currency = Column(String(10), nullable=False)
+    amount = Column(Float, nullable=False)       # 正=存入 负=取出
+    balance_after = Column(Float, nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Pydantic Schemas (API request/response)
 # ══════════════════════════════════════════════════════════════════════════════

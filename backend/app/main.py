@@ -23,7 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from .database import init_db, SessionLocal
-from .models import PriceCache, AlertSetting, MarketType
+from .models import PriceCache, AlertSetting, MarketType, CashLog
 from .services.price_service import fetch_price, fetch_cn_price, fetch_prices_batch
 from .services.alert_service import check_alerts
 
@@ -282,20 +282,14 @@ class TelegramAuthMiddleware(BaseHTTPMiddleware):
         if init_data and bot_token and _verify_telegram_init_data(init_data, bot_token):
             return await call_next(request)
 
-        # 有 initData 但验签失败 → 403（伪造请求）
-        if init_data and bot_token and not _verify_telegram_init_data(init_data, bot_token):
+        # 有 initData 但验签失败
+        if init_data:
             from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Invalid Telegram signature"},
-            )
+            return JSONResponse(status_code=403, content={"detail": "Invalid Telegram signature"})
 
-        # 无 initData → 403（普通浏览器直接访问）
+        # 无 initData
         from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "Telegram authentication required"},
-        )
+        return JSONResponse(status_code=403, content={"detail": "Telegram authentication required"})
 
 app.add_middleware(TelegramAuthMiddleware)
 

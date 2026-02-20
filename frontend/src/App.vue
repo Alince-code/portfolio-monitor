@@ -54,6 +54,7 @@ const alertSettings = ref([])
 const alertGroupsRaw = ref([])
 const alertHistory = ref([])
 const cashAccounts = ref([])
+const cashLogs = ref([])
 const totalAssets = ref(null)
 const testingAlert = ref(false)
 const showAddAlert = ref(false)
@@ -72,6 +73,46 @@ const watchlistData = ref([])
 const macroIndicators = ref([])
 const earningsUpcoming = ref([])
 const earningsRecent = ref([])
+
+const earningsRecentGrouped = computed(() => {
+  const map = {}
+  for (const e of earningsRecent.value) {
+    if (!map[e.symbol]) map[e.symbol] = { symbol: e.symbol, name: e.name, records: [] }
+    map[e.symbol].records.push(e)
+  }
+  // 每组内按日期倒序
+  for (const g of Object.values(map)) {
+    g.records.sort((a, b) => (b.report_date || '').localeCompare(a.report_date || ''))
+  }
+  return Object.values(map)
+})
+
+// 生成 EPS sparkline SVG path
+function epsSparkline(records) {
+  // 按日期正序取有实际EPS的点
+  const pts = records
+    .filter(r => r.actual_eps != null)
+    .slice()
+    .sort((a, b) => (a.report_date || '').localeCompare(b.report_date || ''))
+  if (pts.length < 2) return null
+
+  const W = 80, H = 28, PAD = 3
+  const vals = pts.map(p => p.actual_eps)
+  const minV = Math.min(...vals)
+  const maxV = Math.max(...vals)
+  const range = maxV - minV || 1
+
+  const coords = pts.map((p, i) => {
+    const x = PAD + (i / (pts.length - 1)) * (W - PAD * 2)
+    const y = PAD + (1 - (p.actual_eps - minV) / range) * (H - PAD * 2)
+    return [x, y]
+  })
+
+  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ')
+  const last = coords[coords.length - 1]
+  const trend = vals[vals.length - 1] >= vals[vals.length - 2] ? 'up' : 'down'
+  return { path, W, H, last, trend, pts }
+}
 const earningsLoading = ref(false)
 const snapshotHistory = ref([])
 const netWorthChartRef = ref(null)
@@ -170,11 +211,12 @@ const txFilter = ref({ symbol: '' })
 const alertForm = ref({ symbol: '', name: '', market: 'us', is_primary: true, label: '', target_buy: null, target_sell: null, stop_loss: null, amount: '' })
 const cashForm = ref({ currency: 'USD', amount: null, notes: '' })
 
-// 获取 Telegram initData（Mini App 环境下有值，普通浏览器为空）
-const tgInitData = window.Telegram?.WebApp?.initData || ''
+// 获取 Telegram initData（每次请求时实时读取，避免 SDK 未初始化时取到空值）
+function getTgInitData() { return window.Telegram?.WebApp?.initData || '' }
 
 async function api(method, path, body) {
   const headers = { 'Content-Type': 'application/json' }
+  const tgInitData = getTgInitData()
   if (tgInitData) headers['X-Telegram-Init-Data'] = tgInitData
   const opts = { method, headers }
   if (body) opts.body = JSON.stringify(body)
@@ -207,7 +249,10 @@ async function loadAlerts() {
 async function loadPortfolio() {
   try { portfolio.value = await api('GET', '/api/portfolio'); nextTick(() => { if (tab.value === 'portfolio') { renderHoldingPie(); renderHoldingPnl() } }) } catch (e) { console.error(e) }
 }
-async function loadCashAccounts() { try { cashAccounts.value = await api('GET', '/api/cash') } catch (e) { console.error(e) } }
+async function loadCashAccounts() {
+  try { cashAccounts.value = await api('GET', '/api/cash') } catch (e) { console.error('cash load error', e) }
+  try { cashLogs.value = await api('GET', '/api/cash/logs?limit=30') } catch (e) { console.error('cash logs error', e) }
+}
 
 // ── Macro Indicators ───────────────────────────────────────────────────────
 async function loadMacro() {
@@ -443,6 +488,26 @@ async function testAlert() { testingAlert.value = true; try { const r = await ap
 async function adjustCash() { const f = cashForm.value; if (!f.amount) { alert('请输入金额'); return }; try { await api('POST', '/api/cash/adjust', { currency: f.currency, amount: parseFloat(f.amount), notes: f.notes || null }); cashForm.value = { currency: 'USD', amount: null, notes: '' }; loadCashAccounts(); loadDashboard() } catch (e) { alert('调整失败: ' + e.message) } }
 
 const filteredTx = computed(() => { const f = txFilter.value.symbol.toUpperCase(); if (!f) return transactions.value; return transactions.value.filter(t => t.symbol.includes(f)) })
+
+const txGroupedByDate = computed(() => {
+  const groups = {}
+  for (const t of filteredTx.value) {
+    const day = (t.date || '').slice(0, 10)
+    if (!groups[day]) groups[day] = []
+    groups[day].push(t)
+  }
+  return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]))
+})
+
+const txStats = computed(() => {
+  let totalBuy = 0, totalSell = 0, totalFee = 0
+  for (const t of filteredTx.value) {
+    if (t.action === 'buy') totalBuy += (t.amount || 0)
+    else totalSell += (t.amount || 0)
+    totalFee += (t.fee || 0)
+  }
+  return { totalBuy, totalSell, netIn: totalBuy - totalSell, totalFee, count: filteredTx.value.length }
+})
 const filteredHistory = computed(() => { const f = historyFilter.value.toUpperCase(); if (!f) return alertHistory.value; return alertHistory.value.filter(a => a.symbol.includes(f)) })
 const usStockPrices = computed(() => prices.value.filter(p => p.currency !== 'CNY'))
 const cnStockPrices = computed(() => prices.value.filter(p => p.currency === 'CNY'))
@@ -475,7 +540,40 @@ const holdingBuildProgress = computed(() => {
 function fmtPrice(v, currency) { if (v == null) return '-'; return (currency === 'CNY' ? '¥' : '$') + v.toFixed(2) }
 function fmtChange(v) { if (v == null) return '-'; return (v >= 0 ? '+' : '') + v.toFixed(2) }
 function fmtPct(v) { if (v == null) return '-'; return (v >= 0 ? '+' : '') + v.toFixed(2) + '%' }
-function fmtNum(v) { if (v == null) return '0.00'; return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+function fmtNum(v, decimals = 2) { if (v == null) return '0'; return v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) }
+
+// 资产构成饼图数据 + SVG arc
+function cashPieSegments(ta) {
+  if (!ta) return []
+  const rate = ta.usd_to_cny || 7.2
+  const usStock = ta.stock_value_usd || 0
+  const cnStock = (ta.stock_value_cny || 0) / rate
+  const usdCash = ta.cash_usd || 0
+  const cnyCash = (ta.cash_cny || 0) / rate
+  const total = ta.total_assets_usd || 1
+
+  const items = [
+    { label: '美股', val: '$' + fmtNum(usStock, 0), raw: usStock, color: '#58a6ff' },
+    { label: 'A股', val: '¥' + fmtNum(ta.stock_value_cny || 0, 0), raw: cnStock, color: '#3fb950' },
+    { label: '美元现金', val: '$' + fmtNum(usdCash, 0), raw: usdCash, color: '#d29922' },
+    { label: '人民币现金', val: '¥' + fmtNum(ta.cash_cny || 0, 0), raw: cnyCash, color: '#a371f7' },
+  ].filter(i => i.raw > 0)
+
+  // 计算 SVG arc path
+  const cx = 60, cy = 60, r = 46
+  let startAngle = -Math.PI / 2
+  return items.map(item => {
+    const pct = Math.round(item.raw / total * 100)
+    const angle = (item.raw / total) * Math.PI * 2
+    const endAngle = startAngle + angle
+    const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle)
+    const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle)
+    const large = angle > Math.PI ? 1 : 0
+    const d = `M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large},1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`
+    startAngle = endAngle
+    return { ...item, d, pct }
+  })
+}
 function fmtDate(d) { if (!d) return '-'; return new Date(d).toLocaleDateString('zh-CN') }
 function fmtTime(d) { if (!d) return '-'; return new Date(d).toLocaleString('zh-CN') }
 function pnlClass(v) { if (v == null || v === 0) return ''; return v > 0 ? 'positive' : 'negative' }
@@ -865,6 +963,8 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
   <!-- Transactions -->
   <div v-if="tab==='transactions'" class="container">
     <div class="page-header"><h2>📝 交易记录</h2><div class="page-actions"><a href="/api/transactions/export/csv" class="btn-outline btn-sm" target="_blank">📥 CSV</a><button class="btn-primary btn-sm" @click="showAddTx=!showAddTx">{{ showAddTx?'收起':'➕ 添加' }}</button></div></div>
+
+    <!-- 添加表单 -->
     <div class="card form-card" v-show="showAddTx" style="margin-bottom:16px">
       <form @submit.prevent="addTransaction" class="form-grid">
         <div class="form-group"><label>代码</label><input v-model="txForm.symbol" placeholder="GOOGL" required></div>
@@ -879,9 +979,52 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
       </form>
       <p class="hint">💡 买入自动扣减现金，卖出自动增加</p>
     </div>
+
+    <!-- 统计卡片 -->
+    <div class="tx-stats" v-if="txStats.count > 0">
+      <div class="tx-stat-card"><div class="tx-stat-label">共 {{ txStats.count }} 笔</div><div class="tx-stat-value">全部交易</div></div>
+      <div class="tx-stat-card buy"><div class="tx-stat-label">总买入</div><div class="tx-stat-value">${{ fmtNum(txStats.totalBuy) }}</div></div>
+      <div class="tx-stat-card sell"><div class="tx-stat-label">总卖出</div><div class="tx-stat-value">${{ fmtNum(txStats.totalSell) }}</div></div>
+      <div class="tx-stat-card" :class="txStats.netIn >= 0 ? 'buy' : 'sell'"><div class="tx-stat-label">净投入</div><div class="tx-stat-value">${{ fmtNum(txStats.netIn) }}</div></div>
+    </div>
+
+    <!-- 筛选 + 时间轴 -->
     <div class="card">
-      <div class="card-header"><h3>交易历史</h3><input v-model="txFilter.symbol" placeholder="筛选代码" class="filter-input"></div>
-      <table class="table"><thead><tr><th>日期</th><th>代码</th><th>名称</th><th>操作</th><th>价格</th><th>股数</th><th>金额</th><th>手续费</th><th>备注</th><th></th></tr></thead><tbody><tr v-for="t in filteredTx" :key="t.id"><td>{{ fmtDate(t.date) }}</td><td class="mono stock-code">{{ t.symbol }}</td><td>{{ t.name }}</td><td><span :class="t.action==='buy'?'tag-buy':'tag-sell'">{{ t.action==='buy'?'买入':'卖出' }}</span></td><td class="mono">{{ fmtPrice(t.price) }}</td><td>{{ t.shares }}</td><td class="mono">${{ fmtNum(t.amount) }}</td><td class="mono">${{ t.fee.toFixed(2) }}</td><td>{{ t.notes||'-' }}</td><td><button class="btn-danger-sm" @click="deleteTx(t.id)">×</button></td></tr></tbody></table>
+      <div class="card-header"><h3>交易历史</h3><input v-model="txFilter.symbol" placeholder="筛选代码..." class="filter-input"></div>
+
+      <!-- 时间轴（桌面端） -->
+      <div class="tx-timeline" v-if="txGroupedByDate.length > 0">
+        <div class="tx-day-group" v-for="[day, txs] in txGroupedByDate" :key="day">
+          <div class="tx-day-header">
+            <span class="tx-day-dot"></span>
+            <span class="tx-day-label">{{ day }}</span>
+            <span class="tx-day-count">{{ txs.length }} 笔</span>
+          </div>
+          <div class="tx-day-items">
+            <div class="tx-item" v-for="t in txs" :key="t.id">
+              <div class="tx-item-dot" :class="t.action === 'buy' ? 'dot-buy' : 'dot-sell'"></div>
+              <div class="tx-item-body">
+                <div class="tx-item-main">
+                  <span :class="t.action==='buy'?'tag-buy':'tag-sell'" class="tx-action-tag">{{ t.action==='buy'?'买入':'卖出' }}</span>
+                  <span class="tx-symbol mono">{{ t.symbol }}</span>
+                  <span class="tx-name">{{ t.name }}</span>
+                  <span class="tx-shares">{{ t.shares }} 股</span>
+                  <span class="tx-at">@</span>
+                  <span class="tx-price mono">{{ fmtPrice(t.price) }}</span>
+                </div>
+                <div class="tx-item-meta">
+                  <span class="tx-amount mono">${{ fmtNum(t.amount) }}</span>
+                  <span class="tx-fee" v-if="t.fee > 0">手续费 ${{ t.fee.toFixed(2) }}</span>
+                  <span class="tx-notes" v-if="t.notes">{{ t.notes }}</span>
+                </div>
+              </div>
+              <button class="btn-danger-sm tx-del" @click="deleteTx(t.id)" title="删除">×</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 移动端卡片 -->
       <div class="mobile-card-list">
         <div v-for="t in filteredTx" :key="'m-tx-'+t.id" class="mobile-stock-card">
           <div class="mobile-stock-card-header">
@@ -896,6 +1039,7 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
           <div v-if="t.notes" class="mobile-stock-card-row"><span class="label">备注</span><span class="value">{{ t.notes }}</span></div>
         </div>
       </div>
+
       <div v-if="filteredTx.length===0" class="empty">暂无交易记录</div>
     </div>
   </div>
@@ -903,8 +1047,70 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
   <!-- Cash -->
   <div v-if="tab==='cash'" class="container">
     <div class="page-header"><h2>💵 现金账户管理</h2></div>
-    <div class="summary-cards" v-if="cashAccounts.length>0"><div class="summary-card highlight" v-for="acc in cashAccounts" :key="acc.currency"><div class="summary-icon">{{ acc.currency==='USD'?'💵':'💴' }}</div><div class="summary-content"><div class="summary-label">{{ CURRENCY_NAMES[acc.currency]||acc.currency }}现金</div><div class="summary-value">{{ CURRENCY_SYMBOLS[acc.currency]||'$' }}{{ fmtNum(acc.balance) }}</div></div></div></div>
-    <div class="card form-card">
+
+    <!-- 顶部：饼图 + 仓位进度条 -->
+    <div class="cash-overview" v-if="totalAssets">
+      <!-- 资产构成饼图 -->
+      <div class="card cash-pie-card">
+        <div class="card-header"><h3>资产构成</h3></div>
+        <div class="cash-pie-wrap">
+          <svg viewBox="0 0 120 120" width="120" height="120" class="cash-pie-svg">
+            <template v-if="totalAssets">
+              <template v-for="(seg, i) in cashPieSegments(totalAssets)" :key="i">
+                <path :d="seg.d" :fill="seg.color" opacity="0.9"/>
+              </template>
+              <!-- 中心圆 -->
+              <circle cx="60" cy="60" r="32" :fill="'var(--bg-card)'"/>
+              <text x="60" y="56" text-anchor="middle" font-size="9" fill="var(--text-dim)">总资产</text>
+              <text x="60" y="68" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text)">${{ fmtNum(totalAssets.total_assets_usd,0) }}</text>
+            </template>
+          </svg>
+          <div class="cash-pie-legend">
+            <div class="pie-legend-item" v-for="seg in cashPieSegments(totalAssets)" :key="seg.label">
+              <span class="pie-dot" :style="{background: seg.color}"></span>
+              <span class="pie-label">{{ seg.label }}</span>
+              <span class="pie-pct">{{ seg.pct }}%</span>
+              <span class="pie-val mono">{{ seg.val }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 仓位进度条 -->
+      <div class="card cash-position-card">
+        <div class="card-header"><h3>仓位分布</h3></div>
+        <div class="position-bars">
+          <div class="position-bar-item" v-for="seg in cashPieSegments(totalAssets)" :key="'bar-'+seg.label">
+            <div class="position-bar-header">
+              <span class="position-bar-label">{{ seg.label }}</span>
+              <span class="position-bar-pct">{{ seg.pct }}%</span>
+              <span class="position-bar-val mono">{{ seg.val }}</span>
+            </div>
+            <div class="position-bar-track">
+              <div class="position-bar-fill" :style="{width: seg.pct + '%', background: seg.color}"></div>
+            </div>
+          </div>
+          <div class="position-hint" v-if="totalAssets">
+            <span>💡 现金仓位 {{ Math.round((totalAssets.cash_usd + totalAssets.cash_cny / totalAssets.usd_to_cny) / totalAssets.total_assets_usd * 100) }}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 现金账户余额 -->
+    <div class="summary-cards" v-if="cashAccounts.length>0" style="margin-bottom:16px">
+      <div class="summary-card highlight" v-for="acc in cashAccounts" :key="acc.currency">
+        <div class="summary-icon">{{ acc.currency==='USD'?'💵':'💴' }}</div>
+        <div class="summary-content">
+          <div class="summary-label">{{ CURRENCY_NAMES[acc.currency]||acc.currency }}现金</div>
+          <div class="summary-value">{{ CURRENCY_SYMBOLS[acc.currency]||'$' }}{{ fmtNum(acc.balance) }}</div>
+          <div class="summary-sub">更新 {{ fmtDate(acc.updated_at) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 调整表单 -->
+    <div class="card form-card" style="margin-bottom:16px">
       <h3>调整现金余额</h3>
       <form @submit.prevent="adjustCash" class="form-grid">
         <div class="form-group"><label>币种</label><select v-model="cashForm.currency"><option value="USD">美元</option><option value="CNY">人民币</option></select></div>
@@ -914,16 +1120,23 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
       </form>
       <p class="hint">💡 正数存入，负数取出。买卖股票自动联动。</p>
     </div>
-    <div class="card mt" v-if="totalAssets">
-      <h3>资产汇总 (USD等值)</h3>
-      <div class="asset-summary">
-        <div class="asset-row"><span class="asset-label">美股市值:</span><span class="asset-value">${{ fmtNum(totalAssets.stock_value_usd) }}</span></div>
-        <div class="asset-row"><span class="asset-label">A股市值:</span><span class="asset-value">¥{{ fmtNum(totalAssets.stock_value_cny) }}</span></div>
-        <div class="asset-row"><span class="asset-label">美元现金:</span><span class="asset-value">${{ fmtNum(totalAssets.cash_usd) }}</span></div>
-        <div class="asset-row"><span class="asset-label">人民币现金:</span><span class="asset-value">¥{{ fmtNum(totalAssets.cash_cny) }}</span></div>
-        <div class="asset-row"><span class="asset-label">汇率:</span><span class="asset-value">{{ totalAssets.usd_to_cny }}</span></div>
-        <div class="asset-row total"><span class="asset-label">总资产:</span><span class="asset-value highlight">${{ fmtNum(totalAssets.total_assets_usd) }}</span></div>
+
+    <!-- 操作日志 -->
+    <div class="card">
+      <div class="card-header"><h3>操作记录</h3></div>
+      <div v-if="cashLogs.length > 0" class="cash-log-list">
+        <div v-for="log in cashLogs" :key="log.id" class="cash-log-row">
+          <span class="cash-log-icon">{{ log.amount > 0 ? '⬆️' : '⬇️' }}</span>
+          <span class="cash-log-currency">{{ log.currency }}</span>
+          <span class="cash-log-amount mono" :class="log.amount > 0 ? 'text-green' : 'text-red'">
+            {{ log.amount > 0 ? '+' : '' }}{{ log.currency === 'CNY' ? '¥' : '$' }}{{ fmtNum(Math.abs(log.amount)) }}
+          </span>
+          <span class="cash-log-after mono">余额 {{ log.currency === 'CNY' ? '¥' : '$' }}{{ fmtNum(log.balance_after) }}</span>
+          <span class="cash-log-note" v-if="log.reason">{{ log.reason }}</span>
+          <span class="cash-log-date">{{ fmtDate(log.created_at) }}</span>
+        </div>
       </div>
+      <div v-else class="empty">暂无操作记录</div>
     </div>
   </div>
 
@@ -931,69 +1144,114 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
   <div v-if="tab==='earnings'" class="container">
     <div class="page-header"><h2>📅 财报日历</h2><button class="btn-outline btn-sm" @click="loadEarnings" :disabled="earningsLoading">{{ earningsLoading ? '加载中...' : '🔄 刷新' }}</button></div>
 
-    <div class="card">
-      <h3>📆 未来财报</h3>
-      <div v-if="earningsUpcoming.length > 0" class="earnings-timeline">
-        <div v-for="e in earningsUpcoming" :key="e.symbol + '-' + e.report_date" class="earnings-item">
-          <div class="earnings-item-header">
-            <div class="earnings-stock">
-              <span class="stock-symbol">{{ e.symbol }}</span>
-              <span class="stock-name">{{ e.name }}</span>
-            </div>
-            <div class="earnings-date-info">
-              <span class="earnings-date">{{ e.report_date }}</span>
-              <span class="earnings-countdown" v-if="e.days_until != null">
-                {{ e.days_until === 0 ? '今天' : e.days_until === 1 ? '明天' : e.days_until + '天后' }}
+    <!-- 未来财报：倒计时卡片 -->
+    <div class="section-title">📆 即将发布</div>
+    <div v-if="earningsUpcoming.length > 0" class="earnings-upcoming-grid">
+      <div v-for="e in earningsUpcoming" :key="e.symbol + '-' + e.report_date"
+        class="earnings-upcoming-card"
+        :class="{
+          'urgent': e.days_until != null && e.days_until <= 1,
+          'soon': e.days_until != null && e.days_until <= 7 && e.days_until > 1
+        }">
+        <div class="earnings-card-top">
+          <div class="earnings-card-stock">
+            <span class="earnings-card-symbol mono">{{ e.symbol }}</span>
+            <span class="earnings-card-name">{{ e.name }}</span>
+          </div>
+          <div class="earnings-card-countdown" v-if="e.days_until != null">
+            <span class="countdown-num">{{ e.days_until === 0 ? '今天' : e.days_until === 1 ? '明天' : e.days_until }}</span>
+            <span class="countdown-unit" v-if="e.days_until > 1">天后</span>
+          </div>
+        </div>
+        <div class="earnings-card-date">{{ e.report_date }}</div>
+        <div class="earnings-card-estimates" v-if="e.estimate_eps != null || e.estimate_revenue">
+          <div class="earnings-estimate-row" v-if="e.estimate_eps != null">
+            <span class="estimate-label">预期 EPS</span>
+            <span class="estimate-value mono">${{ e.estimate_eps.toFixed(2) }}</span>
+          </div>
+          <div class="earnings-estimate-row" v-if="e.estimate_revenue">
+            <span class="estimate-label">预期营收</span>
+            <span class="estimate-value mono">${{ (e.estimate_revenue / 1e9).toFixed(2) }}B</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card" v-else><div class="empty">{{ earningsLoading ? '加载中...' : '未来30天暂无财报日期' }}</div></div>
+
+    <!-- 最近财报：按股票分组 -->
+    <div class="section-title" style="margin-top:24px">📊 最近财报</div>
+    <div v-if="earningsRecentGrouped.length > 0" class="earnings-by-stock">
+      <div v-for="group in earningsRecentGrouped" :key="group.symbol" class="earnings-stock-group">
+        <!-- 股票标题行 -->
+        <div class="earnings-stock-group-header">
+          <span class="earnings-card-symbol mono">{{ group.symbol }}</span>
+          <span class="earnings-card-name">{{ group.name }}</span>
+          <div class="eps-sparkline-wrap" v-if="epsSparkline(group.records)" :title="'EPS趋势：' + epsSparkline(group.records).pts.map(p=>p.actual_eps.toFixed(2)).join(' → ')">
+            <span class="eps-sparkline-label">EPS趋势</span>
+            <svg :width="epsSparkline(group.records).W" :height="epsSparkline(group.records).H" class="eps-sparkline-svg">
+              <!-- 渐变填充 -->
+              <defs>
+                <linearGradient :id="'sg-'+group.symbol" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" :stop-color="epsSparkline(group.records).trend==='up' ? '#3fb950' : '#f85149'" stop-opacity="0.3"/>
+                  <stop offset="100%" :stop-color="epsSparkline(group.records).trend==='up' ? '#3fb950' : '#f85149'" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <!-- 填充区域 -->
+              <path
+                :d="epsSparkline(group.records).path + ` L${epsSparkline(group.records).last[0].toFixed(1)},${epsSparkline(group.records).H} L3,${epsSparkline(group.records).H} Z`"
+                :fill="'url(#sg-'+group.symbol+')'"
+              />
+              <!-- 折线 -->
+              <path
+                :d="epsSparkline(group.records).path"
+                fill="none"
+                :stroke="epsSparkline(group.records).trend==='up' ? '#3fb950' : '#f85149'"
+                stroke-width="1.5"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+              />
+              <!-- 末点圆点 -->
+              <circle
+                :cx="epsSparkline(group.records).last[0]"
+                :cy="epsSparkline(group.records).last[1]"
+                r="2.5"
+                :fill="epsSparkline(group.records).trend==='up' ? '#3fb950' : '#f85149'"
+              />
+            </svg>
+          </div>
+        </div>
+        <!-- 该股票的财报记录列表 -->
+        <div class="earnings-record-list">
+          <div v-for="e in group.records" :key="e.report_date"
+            class="earnings-record-row"
+            :class="e.beat_miss === 'beat' ? 'record-beat' : e.beat_miss === 'miss' ? 'record-miss' : e.beat_miss === 'met' ? 'record-met' : ''">
+            <span class="record-date mono">{{ e.report_date || '-' }}</span>
+            <div class="record-eps" v-if="e.estimate_eps != null || e.actual_eps != null">
+              <span class="record-eps-item">
+                <span class="eps-label">预期</span>
+                <span class="mono">{{ e.estimate_eps != null ? '$' + e.estimate_eps.toFixed(2) : '-' }}</span>
+              </span>
+              <span class="record-eps-arrow">→</span>
+              <span class="record-eps-item">
+                <span class="eps-label">实际</span>
+                <span class="mono" :class="e.beat_miss === 'beat' ? 'text-green' : e.beat_miss === 'miss' ? 'text-red' : ''">
+                  {{ e.actual_eps != null ? '$' + e.actual_eps.toFixed(2) : '—' }}
+                </span>
+              </span>
+              <span class="record-diff" v-if="e.estimate_eps != null && e.actual_eps != null"
+                :class="e.actual_eps >= e.estimate_eps ? 'text-green' : 'text-red'">
+                {{ e.actual_eps >= e.estimate_eps ? '+' : '' }}{{ (((e.actual_eps - e.estimate_eps) / Math.abs(e.estimate_eps)) * 100).toFixed(1) }}%
               </span>
             </div>
-          </div>
-          <div class="earnings-detail" v-if="e.estimate_eps != null">
-            <span class="earnings-detail-item">预期EPS: ${{ e.estimate_eps.toFixed(2) }}</span>
-            <span class="earnings-detail-item" v-if="e.estimate_revenue">预期营收: ${{ (e.estimate_revenue / 1e9).toFixed(2) }}B</span>
-          </div>
-        </div>
-      </div>
-      <div v-else class="empty">{{ earningsLoading ? '加载中...' : '未来30天暂无财报日期' }}</div>
-    </div>
-
-    <div class="card mt">
-      <h3>📊 最近财报</h3>
-      <div v-if="earningsRecent.length > 0">
-        <table class="table">
-          <thead><tr><th>代码</th><th>名称</th><th>日期</th><th>预期EPS</th><th>实际EPS</th><th>结果</th></tr></thead>
-          <tbody>
-            <tr v-for="e in earningsRecent" :key="e.symbol + '-rec-' + e.report_date">
-              <td class="mono stock-code">{{ e.symbol }}</td>
-              <td>{{ e.name }}</td>
-              <td>{{ e.report_date || '-' }}</td>
-              <td class="mono">{{ e.estimate_eps != null ? '$' + e.estimate_eps.toFixed(2) : '-' }}</td>
-              <td class="mono">{{ e.actual_eps != null ? '$' + e.actual_eps.toFixed(2) : '-' }}</td>
-              <td>
-                <span v-if="e.beat_miss === 'beat'" class="earnings-badge beat">✅ Beat</span>
-                <span v-else-if="e.beat_miss === 'miss'" class="earnings-badge miss">❌ Miss</span>
-                <span v-else-if="e.beat_miss === 'met'" class="earnings-badge met">🟰 Met</span>
-                <span v-else>-</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <!-- Mobile card list -->
-        <div class="mobile-card-list">
-          <div v-for="e in earningsRecent" :key="'m-er-' + e.symbol + e.report_date" class="mobile-stock-card">
-            <div class="mobile-stock-card-header">
-              <div><span class="stock-symbol-lg">{{ e.symbol }}</span><span class="stock-name-sm">{{ e.name }}</span></div>
-              <span v-if="e.beat_miss === 'beat'" class="earnings-badge beat">✅ Beat</span>
-              <span v-else-if="e.beat_miss === 'miss'" class="earnings-badge miss">❌ Miss</span>
-              <span v-else-if="e.beat_miss === 'met'" class="earnings-badge met">🟰 Met</span>
-            </div>
-            <div class="mobile-stock-card-row"><span class="label">日期</span><span class="value">{{ e.report_date || '-' }}</span></div>
-            <div class="mobile-stock-card-row" v-if="e.estimate_eps != null"><span class="label">预期EPS</span><span class="value mono">${{ e.estimate_eps.toFixed(2) }}</span></div>
-            <div class="mobile-stock-card-row" v-if="e.actual_eps != null"><span class="label">实际EPS</span><span class="value mono">${{ e.actual_eps.toFixed(2) }}</span></div>
+            <span v-if="e.beat_miss === 'beat'" class="earnings-badge beat">✅ 超预期</span>
+            <span v-else-if="e.beat_miss === 'miss'" class="earnings-badge miss">❌ 未达预期</span>
+            <span v-else-if="e.beat_miss === 'met'" class="earnings-badge met">🟰 符合预期</span>
+            <span v-else class="earnings-badge muted">— 待定</span>
           </div>
         </div>
       </div>
-      <div v-else class="empty">{{ earningsLoading ? '加载中...' : '暂无最近财报数据' }}</div>
     </div>
+    <div class="card" v-else><div class="empty">{{ earningsLoading ? '加载中...' : '暂无最近财报数据' }}</div></div>
   </div>
 
   <!-- ═══════ Quant Signals ═══════ -->
