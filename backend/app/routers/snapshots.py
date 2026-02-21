@@ -106,7 +106,7 @@ def take_daily_snapshot():
         snapshot = AssetSnapshot(
             date=datetime.now(timezone.utc),
             total_assets_usd=round(total_assets_usd, 2),
-            stock_value_usd=round(stock_value_usd + stock_value_cny / USD_TO_CNY, 2),
+            stock_value_usd=round(stock_value_usd + stock_value_cny / usd_to_cny, 2),
             cash_usd=round(cash_usd, 2),
             cash_cny=round(cash_cny, 2),
             details="; ".join(details_parts) if details_parts else None,
@@ -119,3 +119,13 @@ def take_daily_snapshot():
         logger.error(f"Snapshot error: {e}")
     finally:
         db.close()
+
+
+@router.post("/take")
+def manual_snapshot():
+    """Manually trigger a daily snapshot."""
+    try:
+        take_daily_snapshot()
+        return {"status": "ok", "message": "Snapshot taken"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

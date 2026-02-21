@@ -165,24 +165,53 @@ cmd_sell() {
 }
 
 cmd_watch() {
-    local data
-    data=$(api_get "/api/watchlist")
-    python3 - "$data" << 'PYEOF'
+    local watchlist alerts
+    watchlist=$(api_get "/api/watchlist")
+    alerts=$(api_get "/api/alerts")
+    python3 - "$watchlist" "$alerts" << 'PYEOF'
 import sys, json
-d = json.loads(sys.argv[1])
+
+watchlist = json.loads(sys.argv[1])
+alerts = json.loads(sys.argv[2]) if len(sys.argv) > 2 else []
+
+# 按 symbol 聚合 alerts（含分批建仓计划）
+alert_map = {}
+for a in (alerts if isinstance(alerts, list) else []):
+    sym = a.get("symbol", "")
+    if sym not in alert_map:
+        alert_map[sym] = []
+    alert_map[sym].append(a)
+
 print("=== 监控列表 ===")
-for w in d:
+for w in watchlist:
+    sym = w.get("symbol", "")
     curr = "¥" if w.get("currency") == "CNY" else "$"
     price = w.get("current_price", 0)
     chg = w.get("change_pct", 0)
     sign = "+" if chg >= 0 else ""
-    parts = []
-    if w.get("target_buy"): parts.append(f"买入{curr}{w['target_buy']}")
-    if w.get("target_sell"): parts.append(f"卖出{curr}{w['target_sell']}")
-    if w.get("stop_loss"): parts.append(f"止损{curr}{w['stop_loss']}")
-    targets = "  ".join(parts) if parts else "无档位"
     status = "" if w.get("enabled") else " [已暂停]"
-    print(f"  {w['symbol']} {w['name']}{status}: 现价{curr}{price:.2f} ({sign}{chg:.2f}%)  {targets}")
+    print(f"  {sym} {w['name']}{status}: 现价{curr}{price:.2f} ({sign}{chg:.2f}%)")
+
+    sym_alerts = alert_map.get(sym, [])
+    if sym_alerts:
+        for a in sym_alerts:
+            parts = []
+            label = a.get("label") or ""
+            amount = a.get("amount") or ""
+            if a.get("target_buy"):  parts.append(f"买入{curr}{a['target_buy']}")
+            if a.get("target_sell"): parts.append(f"止盈{curr}{a['target_sell']}")
+            if a.get("stop_loss"):   parts.append(f"止损{curr}{a['stop_loss']}")
+            tag = f" [{label}]" if label else ""
+            amt = f" {amount}" if amount else ""
+            enabled = "" if a.get("enabled") else " ⏸"
+            print(f"    {'●' if a.get('is_primary') else '○'}{tag}{enabled}  {'  '.join(parts)}{amt}")
+    else:
+        parts = []
+        if w.get("target_buy"):  parts.append(f"买入{curr}{w['target_buy']}")
+        if w.get("target_sell"): parts.append(f"止盈{curr}{w['target_sell']}")
+        if w.get("stop_loss"):   parts.append(f"止损{curr}{w['stop_loss']}")
+        if parts:
+            print(f"    ● {'  '.join(parts)}")
 PYEOF
 }
 

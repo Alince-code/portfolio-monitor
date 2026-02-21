@@ -32,7 +32,7 @@ export PORTFOLIO_API_URL="http://your-server:8802"
 | `portfolio buy SYMBOL SHARES PRICE` | 记录买入 |
 | `portfolio sell SYMBOL SHARES PRICE` | 记录卖出 |
 | `portfolio transactions` | 交易历史 |
-| `portfolio watch` | 监控列表 |
+| `portfolio watch` | 监控列表（含分批建仓计划，同时查 /api/watchlist + /api/alerts） |
 
 ## 示例
 
