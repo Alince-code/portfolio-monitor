@@ -1670,3 +1670,93 @@ body {
   .macro-change { font-size: 11px; }
   .earnings-item-header { flex-direction: column; align-items: flex-start; gap: 4px; }
 }
+
+/* ═══════════ Earnings Analysis (老李判断) ═══════════ */
+.earnings-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.earnings-analysis-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.earnings-analysis-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.earnings-analysis-name {
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: 1;
+}
+.earnings-analysis-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.earnings-analysis-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+.analysis-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.analysis-value {
+  font-weight: 600;
+}
+@media (max-width: 768px) {
+  .earnings-analysis-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ═══════════ Earnings Analysis Full Card ═══════════ */
+.earnings-analysis-list { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
+.earnings-analysis-card-full {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.eaf-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.eaf-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.eaf-symbol { font-size: 16px; font-weight: 700; color: var(--blue); }
+.eaf-quarter { font-size: 13px; color: var(--text); font-weight: 600; }
+.eaf-date { font-size: 12px; color: var(--text-muted); }
+.eaf-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.eaf-metrics { display: flex; gap: 24px; flex-wrap: wrap; }
+.eaf-metric { display: flex; align-items: baseline; gap: 6px; }
+.eaf-metric-label { font-size: 12px; color: var(--text-muted); min-width: 28px; }
+.eaf-metric-val { font-size: 15px; font-weight: 700; }
+.eaf-metric-sub { font-size: 12px; color: var(--text-dim); }
+.eaf-metric-diff { font-size: 12px; font-weight: 600; }
+.eaf-guidance, .eaf-analysis, .eaf-advice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.eaf-section-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.eaf-guidance-text { font-size: 13px; color: var(--text); }
+.eaf-analysis-text { font-size: 13px; color: var(--text); line-height: 1.6; white-space: pre-wrap; }
+.eaf-advice-text {
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(88,166,255,0.08);
+  border-left: 3px solid var(--blue);
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
+  line-height: 1.6;
+}

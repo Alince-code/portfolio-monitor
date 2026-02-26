@@ -294,7 +294,7 @@ class TelegramAuthMiddleware(BaseHTTPMiddleware):
 app.add_middleware(TelegramAuthMiddleware)
 
 # Register API routers
-from .routers import portfolio, transactions, alerts, prices, dashboard, cash, watchlist, quant, earnings, snapshots, macro
+from .routers import portfolio, transactions, alerts, prices, dashboard, cash, watchlist, quant, earnings, snapshots, macro, market
 app.include_router(dashboard.router)
 app.include_router(portfolio.router)
 app.include_router(transactions.router)
@@ -306,6 +306,7 @@ app.include_router(quant.router)
 app.include_router(earnings.router)
 app.include_router(snapshots.router)
 app.include_router(macro.router)
+app.include_router(market.router)
 
 # ── Static files (frontend) ──────────────────────────────────────────────────
 

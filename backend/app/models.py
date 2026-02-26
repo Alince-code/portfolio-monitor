@@ -146,6 +146,35 @@ class CashAccount(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class EarningsAnalysis(Base):
+    """老李财报分析结论，财报发布后写入，前端展示。"""
+    __tablename__ = "earnings_analysis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    fiscal_quarter = Column(String(20), nullable=False)   # e.g. "FY2026 Q4"
+    report_date = Column(String(20), nullable=True)       # 实际发布日期 e.g. "2026-02-25"
+    # EPS
+    eps_actual = Column(Float, nullable=True)
+    eps_estimate = Column(Float, nullable=True)
+    eps_surprise_pct = Column(Float, nullable=True)       # (actual-estimate)/estimate * 100
+    # Revenue
+    revenue_actual = Column(Float, nullable=True)         # in billions USD
+    revenue_estimate = Column(Float, nullable=True)
+    revenue_surprise_pct = Column(Float, nullable=True)
+    # Guidance
+    guidance = Column(Text, nullable=True)                # 下季度指引文字
+    # 老李判断
+    verdict = Column(String(20), nullable=True)           # "beat" / "miss" / "met"
+    short_term = Column(String(20), nullable=True)        # "bullish" / "bearish" / "neutral"
+    analysis = Column(Text, nullable=True)                # 完整分析文字（markdown）
+    holding_advice = Column(Text, nullable=True)          # 对持仓的建议
+    # 股价反应
+    price_reaction_pct = Column(Float, nullable=True)     # 财报后次日涨跌幅
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class CashLog(Base):
     """Cash adjustment history log."""
     __tablename__ = "cash_logs"

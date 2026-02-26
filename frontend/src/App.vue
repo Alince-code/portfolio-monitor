@@ -73,6 +73,7 @@ const watchlistData = ref([])
 const macroIndicators = ref([])
 const earningsUpcoming = ref([])
 const earningsRecent = ref([])
+const earningsAnalysis = ref([])
 
 const earningsRecentGrouped = computed(() => {
   const map = {}
@@ -263,12 +264,14 @@ async function loadMacro() {
 async function loadEarnings() {
   earningsLoading.value = true
   try {
-    const [up, rec] = await Promise.all([
+    const [up, rec, analysis] = await Promise.all([
       api('GET', '/api/earnings/upcoming'),
       api('GET', '/api/earnings/recent'),
+      api('GET', '/api/earnings/analysis'),
     ])
     earningsUpcoming.value = up || []
     earningsRecent.value = rec || []
+    earningsAnalysis.value = analysis || []
   } catch (e) { console.error('Earnings load error:', e) }
   finally { earningsLoading.value = false }
 }
@@ -1252,6 +1255,71 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
       </div>
     </div>
     <div class="card" v-else><div class="empty">{{ earningsLoading ? '加载中...' : '暂无最近财报数据' }}</div></div>
+
+    <!-- 老李财报判断区块 -->
+    <div class="section-title" style="margin-top:24px">💰 老李判断</div>
+    <div v-if="earningsAnalysis.length > 0" class="earnings-analysis-list">
+      <div v-for="a in earningsAnalysis" :key="a.id" class="earnings-analysis-card-full">
+        <!-- 头部 -->
+        <div class="eaf-header">
+          <div class="eaf-title">
+            <span class="eaf-symbol mono">{{ a.symbol }}</span>
+            <span class="eaf-quarter">{{ a.fiscal_quarter }}</span>
+            <span class="eaf-date">{{ a.report_date }}</span>
+          </div>
+          <div class="eaf-badges">
+            <span v-if="a.verdict === 'beat'" class="earnings-badge beat">✅ 超预期</span>
+            <span v-else-if="a.verdict === 'miss'" class="earnings-badge miss">❌ 未达预期</span>
+            <span v-else-if="a.verdict === 'met'" class="earnings-badge met">🟰 符合预期</span>
+            <span v-if="a.short_term === 'bullish'" class="earnings-badge beat">📈 短期利好</span>
+            <span v-else-if="a.short_term === 'bearish'" class="earnings-badge miss">📉 短期利空</span>
+            <span v-else-if="a.short_term === 'neutral'" class="earnings-badge met">➡️ 短期中性</span>
+            <span v-if="a.price_reaction_pct != null" class="earnings-badge" :class="a.price_reaction_pct >= 0 ? 'beat' : 'miss'">
+              股价反应 {{ a.price_reaction_pct >= 0 ? '+' : '' }}{{ a.price_reaction_pct.toFixed(1) }}%
+            </span>
+          </div>
+        </div>
+        <!-- 核心数据 -->
+        <div class="eaf-metrics">
+          <div class="eaf-metric" v-if="a.eps_actual != null">
+            <span class="eaf-metric-label">EPS</span>
+            <span class="eaf-metric-val mono" :class="a.eps_surprise_pct >= 0 ? 'text-green' : 'text-red'">
+              ${{ a.eps_actual?.toFixed(2) }}
+            </span>
+            <span class="eaf-metric-sub" v-if="a.eps_estimate != null">预期 ${{ a.eps_estimate?.toFixed(2) }}</span>
+            <span class="eaf-metric-diff" v-if="a.eps_surprise_pct != null" :class="a.eps_surprise_pct >= 0 ? 'text-green' : 'text-red'">
+              {{ a.eps_surprise_pct >= 0 ? '+' : '' }}{{ a.eps_surprise_pct.toFixed(1) }}%
+            </span>
+          </div>
+          <div class="eaf-metric" v-if="a.revenue_actual != null">
+            <span class="eaf-metric-label">营收</span>
+            <span class="eaf-metric-val mono" :class="a.revenue_surprise_pct >= 0 ? 'text-green' : 'text-red'">
+              ${{ a.revenue_actual?.toFixed(2) }}B
+            </span>
+            <span class="eaf-metric-sub" v-if="a.revenue_estimate != null">预期 ${{ a.revenue_estimate?.toFixed(2) }}B</span>
+            <span class="eaf-metric-diff" v-if="a.revenue_surprise_pct != null" :class="a.revenue_surprise_pct >= 0 ? 'text-green' : 'text-red'">
+              {{ a.revenue_surprise_pct >= 0 ? '+' : '' }}{{ a.revenue_surprise_pct.toFixed(1) }}%
+            </span>
+          </div>
+        </div>
+        <!-- 指引 -->
+        <div class="eaf-guidance" v-if="a.guidance">
+          <span class="eaf-section-label">📋 指引</span>
+          <span class="eaf-guidance-text">{{ a.guidance }}</span>
+        </div>
+        <!-- 分析正文 -->
+        <div class="eaf-analysis" v-if="a.analysis">
+          <span class="eaf-section-label">🔍 分析</span>
+          <div class="eaf-analysis-text">{{ a.analysis }}</div>
+        </div>
+        <!-- 持仓建议 -->
+        <div class="eaf-advice" v-if="a.holding_advice">
+          <span class="eaf-section-label">💡 持仓建议</span>
+          <div class="eaf-advice-text">{{ a.holding_advice }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" v-else><div class="empty">暂无财报分析，财报发布后老李会自动写入</div></div>
   </div>
 
   <!-- ═══════ Quant Signals ═══════ -->
