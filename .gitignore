@@ -28,3 +28,4 @@ frontend/dist-backup*/
 *.swp
 *.swo
 .DS_Store
+.chatcode/
