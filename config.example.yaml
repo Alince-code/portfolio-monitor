@@ -15,11 +15,23 @@ monitor:
   # 单日涨跌幅告警阈值（百分比）
   change_alert_pct: 5.0
 
+# 推送通道配置（可选择使用 Telegram 或 钉钉）
+# 通道选择：telegram 或 dingtalk
+alert_channel: "dingtalk"  # 可选值：telegram, dingtalk
+
 # Telegram 推送配置（直接调用 Bot API）
 telegram:
   bot_token: "YOUR_TELEGRAM_BOT_TOKEN"       # 从 @BotFather 获取
   chat_id: "YOUR_CHAT_ID"                     # 群组/频道 ID（负数），或个人 ID
   thread_id: 2                                 # Forum 群组的话题 ID（非 Forum 群可删除此行）
+
+# 钉钉自定义机器人配置
+dingtalk:
+  access_token: "YOUR_DINGTALK_ACCESS_TOKEN"  # 钉钉机器人 webhook 的 access_token
+  secret: "YOUR_DINGTALK_SECRET"              # 钉钉机器人安全设置的加签 secret
+  at_user_ids: []                              # @的钉钉用户ID列表，如：["user123", "user456"]
+  at_mobiles: []                               # @的手机号列表，如：["13800138000", "13900139000"]
+  is_at_all: false                             # 是否@所有人
 
 # 告警设置
 alert:

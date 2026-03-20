@@ -1,7 +1,6 @@
-"""Price fetching service — uses Yahoo Finance v8 chart API via curl_cffi.
+"""价格抓取服务 —— 通过curl_cffi调用雅虎财经v8图表API。
 
-curl_cffi provides browser-impersonation TLS fingerprints to avoid
-Yahoo Finance's aggressive bot detection and rate limiting.
+curl_cffi提供浏览器模拟TLS指纹，规避雅虎财经严格的机器人检测和频率限制。
 """
 
 from __future__ import annotations
@@ -15,11 +14,29 @@ from curl_cffi import requests as cffi_requests
 
 logger = logging.getLogger(__name__)
 
-# Yahoo Finance v8 chart API
+# 雅虎财经v8图表API地址
 YF_BASE = "https://query2.finance.yahoo.com/v8/finance/chart"
 
-# Persistent session with browser impersonation
+# 保持持久化的浏览器模拟会话
 _session = cffi_requests.Session(impersonate="chrome")
+
+
+def detect_currency_from_symbol(symbol: str) -> str:
+    """Detect currency based on stock symbol suffix.
+    
+    Args:
+        symbol: Stock symbol (e.g., AAPL, 0700.HK, 510300.SS)
+        
+    Returns:
+        Currency code: 'USD', 'CNY', or 'HKD'
+    """
+    symbol_upper = symbol.upper()
+    if '.SS' in symbol_upper or '.SZ' in symbol_upper:
+        return 'CNY'
+    elif '.HK' in symbol_upper:
+        return 'HKD'
+    else:
+        return 'USD'
 
 
 def _fetch_chart(symbol: str) -> Dict[str, Any]:
@@ -71,6 +88,13 @@ def _fetch_chart(symbol: str) -> Dict[str, Any]:
             vols = [v for v in quotes.get("volume", []) if v is not None]
             volume = vols[-1] if vols else None
 
+        # Detect currency from symbol suffix, override Yahoo's metadata if needed
+        detected_currency = detect_currency_from_symbol(symbol)
+        yahoo_currency = meta.get("currency", "USD")
+        
+        # Trust our detection for known suffixes, fall back to Yahoo's metadata
+        currency = detected_currency
+        
         return {
             "symbol": symbol,
             "name": meta.get("longName") or meta.get("shortName") or symbol,
@@ -80,7 +104,7 @@ def _fetch_chart(symbol: str) -> Dict[str, Any]:
             "change_pct": change_pct,
             "volume": volume,
             "market_cap": None,
-            "currency": meta.get("currency", "USD"),
+            "currency": currency,
         }
 
     except Exception as e:

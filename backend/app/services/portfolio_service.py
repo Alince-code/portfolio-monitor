@@ -14,7 +14,7 @@ from ..models import (
     HoldingOut, PortfolioOut,
 )
 
-from .exchange_service import get_usd_to_cny
+from .exchange_service import get_usd_to_cny, get_usd_to_hkd
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +68,16 @@ def get_holdings(db: Session) -> PortfolioOut:
         unrealized_pnl = market_value - pos["total_cost"]
         pnl_pct = (unrealized_pnl / pos["total_cost"] * 100) if pos["total_cost"] > 0 else 0.0
 
-        # Convert to USD for unified comparison
+        # Convert to USD for unified comparison (support three currencies)
         usd_to_cny = get_usd_to_cny()
+        usd_to_hkd = get_usd_to_hkd()
+        
         if currency == "CNY":
             market_value_usd = market_value / usd_to_cny
             unrealized_pnl_usd = unrealized_pnl / usd_to_cny
+        elif currency == "HKD":
+            market_value_usd = market_value / usd_to_hkd
+            unrealized_pnl_usd = unrealized_pnl / usd_to_hkd
         else:
             market_value_usd = market_value
             unrealized_pnl_usd = unrealized_pnl

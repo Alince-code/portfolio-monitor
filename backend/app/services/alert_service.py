@@ -1,6 +1,7 @@
-"""Alert service — checks prices against targets and sends Telegram alerts.
+"""Alert service — checks prices against targets and sends alerts.
 
-Uses Telegram Bot API directly for reliability (no CLI dependency).
+Supports both Telegram and DingTalk notifications.
+Uses Telegram Bot API or DingTalk Custom Robot API directly for reliability.
 Supports multi-level alerts: each symbol can have a primary alert and
 multiple sub-level alerts, all checked against the same real price.
 """
@@ -21,13 +22,23 @@ from ..models import AlertSetting, AlertHistory, PriceCache
 
 logger = logging.getLogger(__name__)
 
-# Track last alert time per (alert_id, alert_type) to enforce cooldown
+# 维护各告警维度的最后触发时刻，实施冷却控制
 _last_alert: Dict[str, float] = {}
-COOLDOWN_SECONDS = 3600  # 1 hour
+COOLDOWN_SECONDS = 3600  # 冷却时长一小时
 
-# ── Load Telegram config from config.yaml ─────────────────────────────────────
+# ── 动态读取配置文件 ─────────────────────────────────────────────
 
 _config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
+
+def _load_alert_channel() -> str:
+    """Load alert channel selection from config.yaml."""
+    try:
+        with open(_config_path) as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("alert_channel", "telegram").lower()
+    except Exception as e:
+        logger.error(f"Failed to load alert_channel config: {e}")
+        return "telegram"
 
 def _load_telegram_config() -> dict:
     """Load telegram config from config.yaml dynamically (re-reads each call)."""
@@ -37,6 +48,16 @@ def _load_telegram_config() -> dict:
         return cfg.get("telegram", {})
     except Exception as e:
         logger.error(f"Failed to load telegram config: {e}")
+        return {}
+
+def _load_dingtalk_config() -> dict:
+    """Load dingtalk config from config.yaml dynamically (re-reads each call)."""
+    try:
+        with open(_config_path) as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("dingtalk", {})
+    except Exception as e:
+        logger.error(f"Failed to load dingtalk config: {e}")
         return {}
 
 
@@ -57,7 +78,7 @@ def _record_alert(alert_id: int, alert_type: str):
 
 
 def send_telegram_alert(message: str) -> bool:
-    """Send alert via Telegram Bot API to group topic 2 (💰一起发财吧)."""
+    """Send alert via Telegram Bot API to configured chat/topic."""
     tg = _load_telegram_config()
     bot_token = tg.get("bot_token")
     chat_id = tg.get("chat_id")
@@ -94,6 +115,86 @@ def send_telegram_alert(message: str) -> bool:
     except Exception as e:
         logger.error(f"Telegram alert exception: {e}")
         return False
+
+
+def send_dingtalk_alert(message: str) -> bool:
+    """Send alert via DingTalk Custom Robot API."""
+    dt_cfg = _load_dingtalk_config()
+    access_token = dt_cfg.get("access_token")
+    secret = dt_cfg.get("secret")
+    at_user_ids = dt_cfg.get("at_user_ids", [])
+    at_mobiles = dt_cfg.get("at_mobiles", [])
+    is_at_all = dt_cfg.get("is_at_all", False)
+
+    if not access_token or not secret:
+        logger.error("DingTalk config missing access_token or secret in config.yaml")
+        return False
+
+    try:
+        # Generate signature according to DingTalk security rules
+        timestamp = str(round(time.time() * 1000))
+        string_to_sign = f'{timestamp}\n{secret}'
+        import hmac
+        import hashlib
+        import base64
+        import urllib.parse
+        hmac_code = hmac.new(
+            secret.encode('utf-8'),
+            string_to_sign.encode('utf-8'),
+            digestmod=hashlib.sha256
+        ).digest()
+        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
+
+        # Build URL
+        url = f'https://oapi.dingtalk.com/robot/send?access_token={access_token}&timestamp={timestamp}&sign={sign}'
+
+        # Build request body
+        body = {
+            "at": {
+                "isAtAll": str(is_at_all).lower(),
+                "atUserIds": at_user_ids or [],
+                "atMobiles": at_mobiles or []
+            },
+            "text": {
+                "content": message
+            },
+            "msgtype": "text"
+        }
+
+        headers = {'Content-Type': 'application/json'}
+
+        logger.info(f"Sending alert to DingTalk...")
+        resp = requests.post(url, json=body, headers=headers, timeout=30)
+        data = resp.json()
+
+        if data.get("errcode") == 0:
+            logger.info(f"DingTalk alert sent successfully: {message[:60]}...")
+            return True
+        else:
+            logger.error(f"DingTalk API error: {data.get('errmsg', 'unknown')} (errcode: {data.get('errcode')})")
+            logger.error(f"Full response: {data}")
+            return False
+
+    except requests.Timeout:
+        logger.error("DingTalk alert send timed out (30s)")
+        return False
+    except Exception as e:
+        logger.error(f"DingTalk alert exception: {e}")
+        return False
+
+
+def send_alert(message: str) -> bool:
+    """Send alert via selected channel (Telegram or DingTalk)."""
+    channel = _load_alert_channel()
+    logger.info(f"Using alert channel: {channel}")
+
+    if channel == "dingtalk":
+        return send_dingtalk_alert(message)
+    elif channel == "telegram":
+        return send_telegram_alert(message)
+    else:
+        logger.warning(f"Unknown alert channel '{channel}', falling back to Telegram")
+        return send_telegram_alert(message)
 
 
 def check_alerts(db: Session) -> int:
@@ -151,7 +252,7 @@ def check_alerts(db: Session) -> int:
                     f"{amount_line}"
                     f"已触及目标，可考虑买入！"
                 )
-                sent = send_telegram_alert(msg)
+                sent = send_alert(msg)
                 _save_alert_history(db, symbol, "target_buy", msg, price, sent)
                 _record_alert(alert.id, "target_buy")
                 alert_fired = True
@@ -167,7 +268,7 @@ def check_alerts(db: Session) -> int:
                     f"{amount_line}"
                     f"已触及目标，可考虑卖出！"
                 )
-                sent = send_telegram_alert(msg)
+                sent = send_alert(msg)
                 _save_alert_history(db, symbol, "target_sell", msg, price, sent)
                 _record_alert(alert.id, "target_sell")
                 alert_fired = True
@@ -183,7 +284,7 @@ def check_alerts(db: Session) -> int:
                     f"{amount_line}"
                     f"⚠️ 已触及止损线，请立即关注！"
                 )
-                sent = send_telegram_alert(msg)
+                sent = send_alert(msg)
                 _save_alert_history(db, symbol, "stop_loss", msg, price, sent)
                 _record_alert(alert.id, "stop_loss")
                 alert_fired = True
@@ -199,7 +300,7 @@ def check_alerts(db: Session) -> int:
                     f"日{direction}幅: {cached.change_pct:+.2f}%\n"
                     f"请关注市场动态！"
                 )
-                sent = send_telegram_alert(msg)
+                sent = send_alert(msg)
                 _save_alert_history(db, symbol, "big_change", msg, price, sent)
                 _record_alert(alert.id, "big_change")
                 alert_fired = True
@@ -214,6 +315,7 @@ def check_alerts(db: Session) -> int:
 
 
 def _save_alert_history(db: Session, symbol: str, alert_type: str, message: str, price: float, sent: bool):
+    """归档告警事件以便追溯审计。"""
     history = AlertHistory(
         symbol=symbol,
         alert_type=alert_type,

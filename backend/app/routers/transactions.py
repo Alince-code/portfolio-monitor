@@ -1,4 +1,4 @@
-"""Transaction CRUD endpoints."""
+"""交易记录增删改查API端点。"""
 
 from __future__ import annotations
 

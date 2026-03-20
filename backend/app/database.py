@@ -1,10 +1,10 @@
-"""Database setup and session management."""
+"""数据库设置和会话管理。"""
 
 from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Database file location
+# 数据库文件位置
 DB_DIR = Path(__file__).parent.parent.parent / "data"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "portfolio.db"
@@ -38,5 +38,5 @@ def get_db():
 
 
 def init_db():
-    """Create all tables."""
+    """创建所有表。"""
     Base.metadata.create_all(bind=engine)

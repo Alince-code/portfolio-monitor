@@ -1,10 +1,10 @@
 """
-Portfolio Monitor — FastAPI application entry point.
+投资组合监控系统 — FastAPI 应用程序入口点。
 
-Includes:
-- REST API for portfolio, transactions, alerts, prices
-- Background price monitor with APScheduler
-- Static file serving for the frontend SPA
+功能包括：
+- 投资组合、交易记录、告警设置、价格的REST API
+- 使用APScheduler进行后台价格监控
+- 为前端SPA提供静态文件服务
 """
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ DEFAULT_WATCHLIST = [
 # ── Background price updater ─────────────────────────────────────────────────
 
 def update_prices():
-    """Fetch latest prices for all alert symbols and update cache.
+    """获取所有告警符号的最新价格并更新缓存。
 
-    Only fetches prices for unique real ticker symbols (deduplicating
-    primary and sub-level alerts that share the same symbol).
+    只获取唯一的真实股票代码的价格（去重主级别和子级别的告警，
+    这些告警可能共享相同的股票代码）。
     """
     db = SessionLocal()
     try:
@@ -63,8 +63,8 @@ def update_prices():
         if not alerts:
             return
 
-        # Deduplicate: only fetch each real symbol once.
-        # Prefer primary alert's name for display.
+        # 去重：每个真实股票代码只获取一次。
+        # 显示优先使用主级别告警的名称。
         symbol_info: dict[str, dict] = {}
         for a in alerts:
             sym = a.symbol
@@ -86,7 +86,7 @@ def update_prices():
                 logger.warning(f"Price fetch error for {symbol}: {data['error']}")
                 continue
 
-            # Use the name from alert settings (better than ticker symbol)
+            # 使用告警设置中的名称（比股票代码更好）
             display_name = symbol_info.get(symbol, {}).get("name", data.get("name", ""))
 
             cached = PriceCache(
@@ -119,7 +119,7 @@ def update_prices():
 
 
 def seed_default_alerts():
-    """Seed default watchlist into alert_settings if empty."""
+    """如果告警设置为空，则初始化默认观察列表。"""
     db = SessionLocal()
     try:
         count = db.query(AlertSetting).count()
@@ -142,18 +142,18 @@ def seed_default_alerts():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown lifecycle."""
-    # Startup
+    """应用启动/关闭生命周期管理。"""
+    # 启动阶段
     init_db()
     seed_default_alerts()
 
-    # Add backend/scripts/ to sys.path once (used by quant refresh)
+    # 将 backend/scripts/ 添加到 sys.path 中一次性（用于量化数据刷新）
     import sys
     scripts_dir = str(Path(__file__).parent.parent / "scripts")
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
 
-    # Start background scheduler
+    # 启动后台调度器
     from apscheduler.schedulers.background import BackgroundScheduler
     scheduler = BackgroundScheduler()
     price_interval = _CONFIG.get("monitor", {}).get("interval_active", 60)
@@ -161,7 +161,7 @@ async def lifespan(app: FastAPI):
                       max_instances=1,
                       next_run_time=datetime.now())  # Run immediately on start
     
-    # Quant signals refresh — daily at 16:00 CST (08:00 UTC)
+    # 量化信号刷新 — 每天16:00 CST (08:00 UTC)
     def refresh_quant_signals():
         try:
             from fetch_fundamentals import refresh_all_signals
@@ -171,7 +171,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.add_job(refresh_quant_signals, "cron", hour=8, minute=0, id="quant_refresh")
 
-    # Daily asset snapshot at 16:00 CST (08:00 UTC)
+    # 每日资产快照在16:00 CST (08:00 UTC)
     def daily_snapshot():
         try:
             from .routers.snapshots import take_daily_snapshot
@@ -186,7 +186,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
+    # 关闭阶段
     scheduler.shutdown(wait=False)
     logger.info("Portfolio Monitor shutting down")
 
@@ -200,7 +200,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend and reverse proxy origins
+# CORS 配置 — 允许前端和反向代理来源
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -221,7 +221,7 @@ import re as _re
 import urllib.parse
 import yaml as _yaml
 
-# ── Load config once at module level ──────────────────────────────────────────
+# ── 在模块级别加载配置一次 ──────────────────────────────────────────
 def _load_config() -> dict:
     try:
         cfg_path = Path(__file__).parent.parent.parent / "config.yaml"
@@ -252,19 +252,19 @@ def _verify_telegram_init_data(init_data: str, bot_token: str) -> bool:
     except Exception:
         return False
 
-# 不需要验证的路径前缀
+# 公开路径（不需要身份验证）
 _PUBLIC_PATHS = {"/health", "/api/health", "/assets", "/favicon"}
 
 class TelegramAuthMiddleware(BaseHTTPMiddleware):
     """只允许携带有效 Telegram initData 的请求访问 API。
-    静态资源和 health check 不受限。
-    localhost 访问直接放行（内网调试用）。
+    静态资源和健康检查不受限。
+    本地主机访问直接放行（用于内部网络调试）。
     """
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         host = request.headers.get("host", "")
 
-        # localhost 或 IP 直连放行（内网/VPN 直接访问无需 Telegram 鉴权）
+        # 本地主机或IP直连接放行（内网/VPN直接访问无需Telegram鉴权）
         host_only = host.split(":")[0]
         _is_ip = _re.match(r'^(\d{1,3}\.){3}\d{1,3}$', host_only)
         if "localhost" in host_only or "127.0.0.1" in host_only or _is_ip:
@@ -278,23 +278,24 @@ class TelegramAuthMiddleware(BaseHTTPMiddleware):
         init_data = request.headers.get("X-Telegram-Init-Data", "")
         bot_token = _get_bot_token()
 
-        # 有 initData 且验签通过 → 放行
+        # 存在 initData 且验签通过 → 放行
         if init_data and bot_token and _verify_telegram_init_data(init_data, bot_token):
             return await call_next(request)
 
-        # 有 initData 但验签失败
+        # 存在 initData 但验签失败
         if init_data:
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=403, content={"detail": "Invalid Telegram signature"})
 
-        # 无 initData
+        # 缺少 initData
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=403, content={"detail": "Telegram authentication required"})
 
 app.add_middleware(TelegramAuthMiddleware)
 
-# Register API routers
-from .routers import portfolio, transactions, alerts, prices, dashboard, cash, watchlist, quant, earnings, snapshots, macro, market
+# 注册API路由
+from .routers import auth, portfolio, transactions, alerts, prices, dashboard, cash, watchlist, quant, earnings, snapshots, macro, market
+app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(portfolio.router)
 app.include_router(transactions.router)
@@ -308,7 +309,7 @@ app.include_router(snapshots.router)
 app.include_router(macro.router)
 app.include_router(market.router)
 
-# ── Static files (frontend) ──────────────────────────────────────────────────
+# ── 静态文件（前端） ──────────────────────────────────────────────────
 
 FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
@@ -321,12 +322,12 @@ def health():
 
 # Serve frontend SPA
 if FRONTEND_DIR.exists():
-    # Hashed asset files — can be cached forever by CDN/browser
+    # 带哈希的资源文件 — 可以被CDN/浏览器永久缓存
     class CachedStaticFiles(StaticFiles):
-        """StaticFiles with aggressive caching for hashed filenames."""
+        """对带哈希文件名的静态文件启用激进缓存的StaticFiles。"""
         async def get_response(self, path, scope):
             response = await super().get_response(path, scope)
-            # Assets have content hash in filename, safe to cache long-term
+            # 资源文件名中包含内容哈希，可以长期安全缓存
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return response
 
@@ -334,14 +335,14 @@ if FRONTEND_DIR.exists():
 
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
-        """Serve the SPA — any non-API route gets index.html."""
-        # Skip API routes
+        """提供服务端渲染的应用 — 所有非API路由返回index.html。"""
+        # 跳过API路由
         if full_path.startswith("api/") or full_path.startswith("health"):
-            raise HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail="未找到")
         file_path = FRONTEND_DIR / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
-        # index.html should not be cached by CDN (always serve fresh)
+        # index.html不应被CDN缓存（始终提供最新版本）
         return FileResponse(
             FRONTEND_DIR / "index.html",
             headers={"Cache-Control": "no-cache, must-revalidate"},

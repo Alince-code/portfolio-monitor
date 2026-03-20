@@ -85,7 +85,7 @@ def adjust_cash(payload: CashAccountUpdate, db: Session = Depends(get_db)):
 @router.post("/init", status_code=201)
 def init_cash_accounts(db: Session = Depends(get_db)):
     """Initialize default cash accounts with zero balance."""
-    currencies = [CurrencyType.usd, CurrencyType.cny]
+    currencies = [CurrencyType.usd, CurrencyType.cny, CurrencyType.hkd]
     created = []
 
     for curr in currencies:

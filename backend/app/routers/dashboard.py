@@ -14,7 +14,7 @@ from ..models import (
     DashboardOut, PriceOut, AlertHistoryOut, TransactionOut, CashAccountOut, TotalAssetsOut,
 )
 from ..services.portfolio_service import get_holdings
-from ..services.exchange_service import get_usd_to_cny as _get_usd_to_cny
+from ..services.exchange_service import get_usd_to_cny as _get_usd_to_cny, get_usd_to_hkd as _get_usd_to_hkd
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -38,18 +38,22 @@ def dashboard(db: Session = Depends(get_db)):
     )
     portfolio = get_holdings(db)
 
-    # Get real-time FX rate
+    # Get real-time FX rates
     usd_to_cny = _get_usd_to_cny()
+    usd_to_hkd = _get_usd_to_hkd()
+    cny_to_hkd = round(usd_to_hkd / usd_to_cny, 4)
 
     # Get cash accounts
     cash_accounts = db.query(CashAccount).all()
     cash_map = {acc.currency: acc.balance for acc in cash_accounts}
     cash_usd = cash_map.get("USD", 0.0)
     cash_cny = cash_map.get("CNY", 0.0)
+    cash_hkd = cash_map.get("HKD", 0.0)
 
     # Separate stock values by currency — batch query to avoid N+1
     stock_value_usd = 0.0
     stock_value_cny = 0.0
+    stock_value_hkd = 0.0
     if portfolio and portfolio.holdings:
         holding_symbols = [h.symbol for h in portfolio.holdings]
         price_map = {
@@ -58,26 +62,35 @@ def dashboard(db: Session = Depends(get_db)):
         }
         for h in portfolio.holdings:
             cached = price_map.get(h.symbol)
-            if cached and cached.currency == "CNY":
-                stock_value_cny += h.market_value
-            else:
-                stock_value_usd += h.market_value
+            if cached:
+                if cached.currency == "CNY":
+                    stock_value_cny += h.market_value
+                elif cached.currency == "HKD":
+                    stock_value_hkd += h.market_value
+                else:
+                    stock_value_usd += h.market_value
 
-    # Calculate total in USD equivalent
+    # Calculate total in USD equivalent (three currencies supported)
     total_assets_usd = (
         stock_value_usd
         + cash_usd
         + (stock_value_cny / usd_to_cny)
         + (cash_cny / usd_to_cny)
+        + (stock_value_hkd / usd_to_hkd)
+        + (cash_hkd / usd_to_hkd)
     )
 
     total_assets_data = TotalAssetsOut(
         total_assets_usd=round(total_assets_usd, 2),
         stock_value_usd=round(stock_value_usd, 2),
         stock_value_cny=round(stock_value_cny, 2),
+        stock_value_hkd=round(stock_value_hkd, 2),
         cash_usd=round(cash_usd, 2),
         cash_cny=round(cash_cny, 2),
+        cash_hkd=round(cash_hkd, 2),
         usd_to_cny=usd_to_cny,
+        usd_to_hkd=usd_to_hkd,
+        cny_to_hkd=cny_to_hkd,
     )
 
     return DashboardOut(

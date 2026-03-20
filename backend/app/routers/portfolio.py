@@ -1,4 +1,4 @@
-"""Portfolio & holdings endpoints."""
+"""投资组合和持仓相关的API端点。"""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session

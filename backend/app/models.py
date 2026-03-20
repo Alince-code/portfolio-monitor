@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models + Pydantic schemas."""
+"""SQLAlchemy ORM 模型 + Pydantic 数据架构定义。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from sqlalchemy import (
 from .database import Base
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── 辅助函数 ───────────────────────────────────────────────────────────────────
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -25,7 +25,7 @@ def gen_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-# ── Enums ─────────────────────────────────────────────────────────────────────
+# ── 枚举类型 ─────────────────────────────────────────────────────────────────────
 
 class TradeAction(str, Enum):
     buy = "buy"
@@ -35,15 +35,17 @@ class TradeAction(str, Enum):
 class MarketType(str, Enum):
     us = "us"
     cn = "cn"
+    hk = "hk"
 
 
 class CurrencyType(str, Enum):
     usd = "USD"
     cny = "CNY"
+    hkd = "HKD"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  ORM Models (SQLAlchemy)
+#  ORM 模型 (SQLAlchemy)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class Transaction(Base):
@@ -73,11 +75,11 @@ class AlertSetting(Base):
     target_sell = Column(Float, nullable=True)
     stop_loss = Column(Float, nullable=True)
     enabled = Column(Boolean, default=True)
-    is_primary = Column(Boolean, default=True)   # True = main level, False = sub-level
-    label = Column(String(100), nullable=True)    # Optional label e.g. "$280买入档"
-    amount = Column(String(200), nullable=True)   # Buy/sell amount description e.g. "$15,000" or "减仓30%"
+    is_primary = Column(Boolean, default=True)   # True = 主级别，False = 子级别
+    label = Column(String(100), nullable=True)    # 可选标签，例如"$280买入档"
+    amount = Column(String(200), nullable=True)   # 买卖金额描述，例如"$15,000"或"减仓30%"
     expires_at = Column(DateTime, nullable=True)          # 90天后过期
-    last_triggered_at = Column(DateTime, nullable=True)   # 最近触发时间（24h冷却用）
+    last_triggered_at = Column(DateTime, nullable=True)   # 最近触发时间（用于24小时冷却）
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -95,7 +97,7 @@ class AlertHistory(Base):
 
 
 class PriceCache(Base):
-    """Recent price snapshots for dashboard display."""
+    """仪表盘显示用的最近价格快照。"""
     __tablename__ = "price_cache"
 
     symbol = Column(String(20), primary_key=True)
@@ -111,7 +113,7 @@ class PriceCache(Base):
 
 
 class QuantSignal(Base):
-    """Quantitative fundamental signals for valuation analysis."""
+    """估值分析的量化基本面指标信号。"""
     __tablename__ = "quant_signals"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -131,8 +133,11 @@ class AssetSnapshot(Base):
     date = Column(DateTime, nullable=False, index=True)
     total_assets_usd = Column(Float, nullable=False, default=0.0)
     stock_value_usd = Column(Float, nullable=False, default=0.0)
+    stock_value_cny = Column(Float, nullable=False, default=0.0)
+    stock_value_hkd = Column(Float, nullable=False, default=0.0)
     cash_usd = Column(Float, nullable=False, default=0.0)
     cash_cny = Column(Float, nullable=False, default=0.0)
+    cash_hkd = Column(Float, nullable=False, default=0.0)
     details = Column(Text, nullable=True)  # JSON or semicolon-separated holding details
     created_at = Column(DateTime, default=utcnow)
 
@@ -147,7 +152,7 @@ class CashAccount(Base):
 
 
 class EarningsAnalysis(Base):
-    """老李财报分析结论，财报发布后写入，前端展示。"""
+    """老李财报分析结论，财报发布后写入并在前端展示。"""
     __tablename__ = "earnings_analysis"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -188,10 +193,26 @@ class CashLog(Base):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Pydantic Schemas (API request/response)
+#  用户认证模型 (ORM)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Transaction ───────────────────────────────────────────────────────────────
+class User(Base):
+    """用户账号模型，存储登录凭据和个人资料。"""
+    __tablename__ = "users"
+
+    username = Column(String(50), primary_key=True, nullable=False, unique=True)
+    email = Column(String(100), nullable=False, unique=True)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Pydantic 数据架构 (API 请求/响应)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 交易记录 ───────────────────────────────────────────────────────────────
 
 class TransactionCreate(BaseModel):
     symbol: str
@@ -221,7 +242,7 @@ class TransactionOut(BaseModel):
         from_attributes = True
 
 
-# ── Alert ─────────────────────────────────────────────────────────────────────
+# ── 告警设置 ─────────────────────────────────────────────────────────────────────
 
 class AlertSettingCreate(BaseModel):
     symbol: str
@@ -280,7 +301,7 @@ class AlertHistoryOut(BaseModel):
         from_attributes = True
 
 
-# ── Portfolio ─────────────────────────────────────────────────────────────────
+# ── 投资组合 ─────────────────────────────────────────────────────────────────
 
 class HoldingOut(BaseModel):
     symbol: str
@@ -304,7 +325,7 @@ class PortfolioOut(BaseModel):
     total_pnl_pct: float
 
 
-# ── Price ─────────────────────────────────────────────────────────────────────
+# ── 价格信息 ─────────────────────────────────────────────────────────────────────
 
 class PriceOut(BaseModel):
     symbol: str
@@ -321,7 +342,7 @@ class PriceOut(BaseModel):
         from_attributes = True
 
 
-# ── Cash Account ──────────────────────────────────────────────────────────────
+# ── 现金账户 ──────────────────────────────────────────────────────────────
 
 class CashAccountOut(BaseModel):
     currency: str
@@ -339,17 +360,21 @@ class CashAccountUpdate(BaseModel):
 
 
 class TotalAssetsOut(BaseModel):
-    """Total assets summary including stocks and cash."""
+    """总资产汇总，包括股票和现金。"""
     total_assets_usd: float  # All assets converted to USD
     stock_value_usd: float   # US stocks value in USD
     stock_value_cny: float   # CN stocks value in CNY
+    stock_value_hkd: float   # HK stocks value in HKD
     cash_usd: float           # USD cash balance
     cash_cny: float           # CNY cash balance
+    cash_hkd: float           # HKD cash balance
     usd_to_cny: float         # Exchange rate used
+    usd_to_hkd: float         # USD to HKD exchange rate
+    cny_to_hkd: float         # CNY to HKD exchange rate
 
 
 class CashAccountHistory(BaseModel):
-    """Cash account history record for tracking changes."""
+    """现金账户历史记录，用于跟踪变化。"""
     id: str
     currency: str
     amount: float
@@ -361,7 +386,7 @@ class CashAccountHistory(BaseModel):
         from_attributes = True
 
 
-# ── Quant Signal ───────────────────────────────────────────────────────────────
+# ── 量化信号 ───────────────────────────────────────────────────────────────
 
 class QuantSignalOut(BaseModel):
     id: int
@@ -385,7 +410,47 @@ class QuantSignalSummary(BaseModel):
     score: Optional[float] = None  # composite score 0-100
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# ── 用户认证 ───────────────────────────────────────────────────────────────
+
+class UserRegister(BaseModel):
+    """用户注册请求体。"""
+    username: str = Field(..., min_length=3, max_length=50, description="用户名")
+    email: str = Field(..., description="电子邮箱")
+    password: str = Field(..., min_length=6, description="密码")
+    full_name: Optional[str] = Field(None, description="全称")
+
+
+class UserLogin(BaseModel):
+    """用户登录请求体。"""
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")
+
+
+class Token(BaseModel):
+    """JWT令牌响应。"""
+    access_token: str
+    token_type: str = "bearer"
+
+
+class ChangePassword(BaseModel):
+    """修改密码请求体。"""
+    old_password: str = Field(..., description="旧密码")
+    new_password: str = Field(..., min_length=6, description="新密码")
+
+
+class UserInfo(BaseModel):
+    """用户基本信息响应。"""
+    username: str
+    email: str
+    full_name: Optional[str]
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── 仪表盘 ─────────────────────────────────────────────────────────────────
 
 class DashboardOut(BaseModel):
     prices: List[PriceOut]

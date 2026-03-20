@@ -142,15 +142,62 @@ def delete_alert(alert_id: int, db: Session = Depends(get_db)):
 # ── Test Alert ────────────────────────────────────────────────────────────────
 
 @router.post("/test-send")
-def test_alert_send():
-    """Send a test alert to verify Telegram integration."""
-    from ..services.alert_service import send_telegram_alert
-    msg = "🧪 Portfolio Monitor 告警推送测试\n\n如果你能看到这条消息，说明告警推送配置正确！"
-    sent = send_telegram_alert(msg)
-    return {"sent": sent, "message": "Test alert sent" if sent else "Test alert failed"}
+def test_alert_send(channel: str = None):
+    """Send a test alert to verify alert integration.
+    
+    Args:
+        channel: Override alert channel (telegram or dingtalk). If not provided, uses config setting.
+    """
+    from ..services.alert_service import send_alert, _load_alert_channel
+    
+    # Use override channel if provided, otherwise use config
+    target_channel = channel.lower() if channel else _load_alert_channel()
+    
+    # Temporarily save original channel
+    import yaml
+    from pathlib import Path
+    config_path = Path(__file__).parent.parent.parent.parent / "config.yaml"
+    
+    try:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        
+        original_channel = cfg.get("alert_channel", "telegram")
+        
+        # Set temporary channel if override provided
+        if channel:
+            cfg["alert_channel"] = target_channel
+            
+            # Save temporarily
+            with open(config_path, 'w') as f:
+                yaml.dump(cfg, f, allow_unicode=True, sort_keys=False)
+            
+            msg = f"🧪 Portfolio Monitor 告警推送测试\n\n正在测试 {target_channel.upper()} 通道...\n\n如果你能看到这条消息，说明告警推送配置正确！"
+        else:
+            msg = f"🧪 Portfolio Monitor 告警推送测试\n\n正在使用默认通道 ({original_channel.upper()}) ...\n\n如果你能看到这条消息，说明告警推送配置正确！"
+        
+        sent = send_alert(msg)
+        
+        # Restore original channel if we changed it
+        if channel:
+            cfg["alert_channel"] = original_channel
+            with open(config_path, 'w') as f:
+                yaml.dump(cfg, f, allow_unicode=True, sort_keys=False)
+                
+        return {
+            "sent": sent,
+            "message": "Test alert sent" if sent else "Test alert failed",
+            "channel_used": target_channel
+        }
+    except Exception as e:
+        return {
+            "sent": False,
+            "message": f"Test alert failed: {str(e)}",
+            "channel_used": target_channel
+        }
 
 
-# ── Alert History ─────────────────────────────────────────────────────────────
+# ── 告警历史记录 ─────────────────────────────────────────────────────────────
 
 @router.get("/history", response_model=List[AlertHistoryOut])
 def alert_history(
@@ -158,7 +205,7 @@ def alert_history(
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
 ):
-    """Get alert history."""
+    """查询过往触发的告警记录。"""
     q = db.query(AlertHistory).order_by(AlertHistory.triggered_at.desc())
     if symbol:
         q = q.filter(AlertHistory.symbol == symbol.upper())
