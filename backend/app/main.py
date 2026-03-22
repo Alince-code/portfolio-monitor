@@ -24,6 +24,7 @@ from starlette.requests import Request
 
 from .database import init_db, SessionLocal
 from .models import PriceCache, AlertSetting, MarketType, CashLog
+from .routers.auth import ensure_default_admin, get_user_from_token
 from .services.price_service import fetch_price, fetch_cn_price, fetch_prices_batch
 from .services.alert_service import check_alerts
 
@@ -138,6 +139,16 @@ def seed_default_alerts():
         db.close()
 
 
+def seed_default_admin_user():
+    """初始化默认管理员账号。"""
+    db = SessionLocal()
+    try:
+        ensure_default_admin(db)
+        logger.info("Ensured default admin account exists")
+    finally:
+        db.close()
+
+
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -146,6 +157,7 @@ async def lifespan(app: FastAPI):
     # 启动阶段
     init_db()
     seed_default_alerts()
+    seed_default_admin_user()
 
     # 将 backend/scripts/ 添加到 sys.path 中一次性（用于量化数据刷新）
     import sys
@@ -254,6 +266,7 @@ def _verify_telegram_init_data(init_data: str, bot_token: str) -> bool:
 
 # 公开路径（不需要身份验证）
 _PUBLIC_PATHS = {"/health", "/api/health", "/assets", "/favicon"}
+_PUBLIC_API_PATHS = {"/api/auth/login", "/api/auth/register"}
 
 class TelegramAuthMiddleware(BaseHTTPMiddleware):
     """只允许携带有效 Telegram initData 的请求访问 API。
@@ -263,6 +276,7 @@ class TelegramAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         host = request.headers.get("host", "")
+        auth_header = request.headers.get("authorization", "")
 
         # 本地主机或IP直连接放行（内网/VPN直接访问无需Telegram鉴权）
         host_only = host.split(":")[0]
@@ -273,6 +287,23 @@ class TelegramAuthMiddleware(BaseHTTPMiddleware):
         # 静态资源放行
         if any(path.startswith(p) for p in _PUBLIC_PATHS) or not path.startswith("/api"):
             return await call_next(request)
+
+        if path in _PUBLIC_API_PATHS:
+            return await call_next(request)
+
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                db = SessionLocal()
+                try:
+                    user = get_user_from_token(token, db)
+                finally:
+                    db.close()
+
+                from fastapi.responses import JSONResponse
+                if user is not None:
+                    return await call_next(request)
+                return JSONResponse(status_code=401, content={"detail": "Invalid or expired access token"})
 
         # 验证 Telegram initData
         init_data = request.headers.get("X-Telegram-Init-Data", "")

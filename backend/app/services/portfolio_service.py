@@ -19,6 +19,17 @@ from .exchange_service import get_usd_to_cny, get_usd_to_hkd
 logger = logging.getLogger(__name__)
 
 
+def infer_currency(symbol: str, cached: PriceCache | None) -> str:
+    """Infer symbol currency when latest price cache is missing."""
+    if cached and cached.currency:
+        return cached.currency
+    if symbol.endswith(".SS") or symbol.endswith(".SZ") or symbol.endswith(".BJ"):
+        return "CNY"
+    if symbol.endswith(".HK"):
+        return "HKD"
+    return "USD"
+
+
 def get_holdings(db: Session) -> PortfolioOut:
     """Calculate current holdings from all transactions."""
     transactions = (
@@ -61,7 +72,7 @@ def get_holdings(db: Session) -> PortfolioOut:
         # Get latest cached price
         cached = db.query(PriceCache).filter(PriceCache.symbol == symbol).first()
         current_price = cached.price if cached else 0.0
-        currency = cached.currency if cached else "USD"
+        currency = infer_currency(symbol, cached)
 
         avg_cost = pos["total_cost"] / pos["shares"] if pos["shares"] > 0 else 0.0
         market_value = current_price * pos["shares"]

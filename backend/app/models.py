@@ -450,6 +450,11 @@ class UserInfo(BaseModel):
         from_attributes = True
 
 
+class AuthResponse(Token):
+    """登录成功后的认证响应。"""
+    user: UserInfo
+
+
 # ── 仪表盘 ─────────────────────────────────────────────────────────────────
 
 class DashboardOut(BaseModel):

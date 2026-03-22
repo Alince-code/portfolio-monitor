@@ -1,34 +1,22 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
+import { clearAuthSession, getStoredToken, getStoredUser } from './auth'
 
 const API = ''
 const CURRENCY_SYMBOLS = { 'USD': '$', 'CNY': '¥', 'HKD': 'HK$' }
 const CURRENCY_NAMES = { 'USD': '美元', 'CNY': '人民币', 'HKD': '港币' }
 const COLORS = ['#58a6ff', '#3fb950', '#bc8cff', '#d29922', '#f85149', '#79c0ff', '#56d364', '#d2a8ff', '#e3b341', '#ff7b72']
 
-// 认证相关状态
-const isAuthenticated = ref(false)
-const currentUser = ref(null)
-const authToken = ref(localStorage.getItem('auth_token') || '')
-
-// 登录表单
-const loginForm = ref({ username: '', password: '' })
-const loginLoading = ref(false)
-const loginError = ref('')
-
-// 注册表单
-const registerForm = ref({ username: '', email: '', password: '', confirmPassword: '', fullName: '' })
-const registerLoading = ref(false)
-const registerError = ref('')
-
 // 密码修改表单
+const currentUser = ref(getStoredUser())
+const authToken = ref(getStoredToken())
 const changePasswordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 const changePasswordLoading = ref(false)
 const changePasswordError = ref('')
 const changePasswordSuccess = ref(false)
 
-// 显示不同的认证视图：'', 'login', 'register', 'profile'
+// 显示不同的界面视图：'', 'profile'
 const authView = ref('')
 
 const tab = ref('dashboard')
@@ -242,6 +230,10 @@ const txForm = ref({ symbol: '', name: '', action: 'buy', price: null, shares: n
 const txFilter = ref({ symbol: '' })
 const alertForm = ref({ symbol: '', name: '', market: 'us', is_primary: true, label: '', target_buy: null, target_sell: null, stop_loss: null, amount: '' })
 const cashForm = ref({ currency: 'USD', amount: null, notes: '' })
+const quoteLoading = ref(false)
+const quoteError = ref('')
+const latestQuote = ref(null)
+const highlightedHoldingSymbol = ref('')
 
 // 获取 Telegram initData（每次请求时实时读取，避免 SDK 未初始化时取到空值）
 function getTgInitData() { return window.Telegram?.WebApp?.initData || '' }
@@ -257,116 +249,27 @@ async function api(method, path, body) {
   const opts = { method, headers }
   if (body) opts.body = JSON.stringify(body)
   const res = await fetch(API + path, opts)
-  if (!res.ok) { const e = await res.json().catch(() => null); throw new Error(e?.detail || 'HTTP ' + res.status) }
+  if (!res.ok) {
+    const e = await res.json().catch(() => null)
+    if (res.status === 401) {
+      clearAuthSession()
+      window.location.replace('/login')
+      return null
+    }
+    throw new Error(e?.detail || 'HTTP ' + res.status)
+  }
   if (res.status === 204) return null
   return res.json()
 }
 
-// 用户认证相关函数
-function checkAuth() {
-  const token = localStorage.getItem('auth_token')
-  const userData = localStorage.getItem('user_info')
-  if (token && userData) {
-    authToken.value = token
-    currentUser.value = JSON.parse(userData)
-    isAuthenticated.value = true
-    return true
-  }
-  return false
-}
-
-async function loginUser() {
-  loginLoading.value = true
-  loginError.value = ''
-  try {
-    const response = await api('POST', '/api/auth/login', {
-      username: loginForm.value.username,
-      password: loginForm.value.password
-    })
-    authToken.value = response.access_token
-    currentUser.value = response.user
-    
-    // 保存认证信息到本地存储
-    localStorage.setItem('auth_token', response.access_token)
-    localStorage.setItem('user_info', JSON.stringify(response.user))
-    
-    isAuthenticated.value = true
-    authView.value = ''
-    
-    // 清除登录表单
-    loginForm.value = { username: '', password: '' }
-    
-    // 加载应用数据
-    loadApplicationData()
-  } catch (error) {
-    loginError.value = error.message || '登录失败，请检查用户名和密码'
-  } finally {
-    loginLoading.value = false
-  }
-}
-
-async function registerUser() {
-  registerLoading.value = true
-  registerError.value = ''
-  
-  // 验证密码匹配
-  if (registerForm.value.password !== registerForm.value.confirmPassword) {
-    registerError.value = '两次输入的密码不一致'
-    registerLoading.value = false
-    return
-  }
-  
-  // 验证密码强度
-  if (registerForm.value.password.length < 6) {
-    registerError.value = '密码长度至少为6个字符'
-    registerLoading.value = false
-    return
-  }
-  
-  try {
-    const response = await api('POST', '/api/auth/register', {
-      username: registerForm.value.username,
-      email: registerForm.value.email,
-      password: registerForm.value.password,
-      full_name: registerForm.value.fullName || ''
-    })
-    
-    // 注册成功后自动登录
-    authToken.value = response.access_token
-    currentUser.value = response.user
-    
-    // 保存认证信息到本地存储
-    localStorage.setItem('auth_token', response.access_token)
-    localStorage.setItem('user_info', JSON.stringify(response.user))
-    
-    isAuthenticated.value = true
-    authView.value = ''
-    
-    // 清除注册表单
-    registerForm.value = { username: '', email: '', password: '', confirmPassword: '', fullName: '' }
-    
-    // 加载应用数据
-    loadApplicationData()
-  } catch (error) {
-    registerError.value = error.message || '注册失败，可能该用户名已被占用'
-  } finally {
-    registerLoading.value = false
-  }
-}
-
 async function logoutUser() {
-  // 清除本地存储
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('user_info')
-  
-  // 重置状态
+  clearAuthSession()
   authToken.value = ''
   currentUser.value = null
-  isAuthenticated.value = false
-  authView.value = 'login'
+  authView.value = ''
   
-  // 清除所有数据
   resetAllData()
+  window.location.replace('/login')
 }
 
 async function changePassword() {
@@ -694,9 +597,28 @@ async function addTransaction() {
   const f = txForm.value
   const body = { symbol: f.symbol.toUpperCase(), name: f.name, action: f.action, price: f.price, shares: f.shares, fee: f.fee || 0, notes: f.notes || null }
   if (f.date) body.date = new Date(f.date).toISOString()
-  try { await api('POST', '/api/transactions', body); txForm.value = { symbol: '', name: '', action: 'buy', price: null, shares: null, fee: 0, date: '', notes: '' }; loadTransactions(); loadPortfolio(); loadDashboard(); loadCashAccounts() } catch (e) { alert('添加失败: ' + e.message) }
+  try {
+    await api('POST', '/api/transactions', body)
+    const savedSymbol = body.symbol
+    txForm.value = { symbol: '', name: '', action: 'buy', price: null, shares: null, fee: 0, date: '', notes: '' }
+    latestQuote.value = null
+    quoteError.value = ''
+    await Promise.all([loadTransactions(), loadPortfolio(), loadDashboard(), loadCashAccounts()])
+    tab.value = 'portfolio'
+    highlightedHoldingSymbol.value = savedSymbol
+    nextTick(() => focusHolding(savedSymbol))
+    setTimeout(() => {
+      if (highlightedHoldingSymbol.value === savedSymbol) highlightedHoldingSymbol.value = ''
+    }, 3500)
+  } catch (e) { alert('添加失败: ' + e.message) }
 }
-async function deleteTx(id) { if (!confirm('确认删除？')) return; try { await api('DELETE', '/api/transactions/' + id); loadTransactions(); loadPortfolio(); loadDashboard(); loadCashAccounts() } catch (e) { alert('删除失败: ' + e.message) } }
+async function deleteTx(id) {
+  if (!confirm('确认删除？')) return
+  try {
+    await api('DELETE', '/api/transactions/' + id)
+    await Promise.all([loadTransactions(), loadPortfolio(), loadDashboard(), loadCashAccounts()])
+  } catch (e) { alert('删除失败: ' + e.message) }
+}
 async function saveAlert() {
   const f = alertForm.value
   const body = { symbol: f.symbol.toUpperCase(), name: f.name, market: f.market, is_primary: f.is_primary, label: f.is_primary ? null : (f.label || null), target_buy: f.target_buy || null, target_sell: f.target_sell || null, stop_loss: f.stop_loss || null, amount: f.amount || null, enabled: true }
@@ -733,26 +655,68 @@ const usStockPrices = computed(() => prices.value.filter(p => p.currency === 'US
 const cnStockPrices = computed(() => prices.value.filter(p => p.currency === 'CNY'))
 const hkStockPrices = computed(() => prices.value.filter(p => p.currency === 'HKD'))
 
+function inferHoldingCurrency(holding) {
+  if (holding?.currency) return holding.currency
+  if (holding?.symbol?.endsWith('.SS') || holding?.symbol?.endsWith('.SZ') || holding?.symbol?.endsWith('.BJ')) return 'CNY'
+  if (holding?.symbol?.endsWith('.HK')) return 'HKD'
+  return 'USD'
+}
+
 // Holdings grouped by currency
 const usHoldings = computed(() => {
-  if (!portfolio.value?.holdings) return [];
-  const usSymbols = new Set(usStockPrices.value.map(p => p.symbol));
-  return portfolio.value.holdings.filter(h => usSymbols.has(h.symbol))
+  if (!portfolio.value?.holdings) return []
+  return portfolio.value.holdings.filter(h => inferHoldingCurrency(h) === 'USD')
 })
 
 const cnHoldings = computed(() => {
-  if (!portfolio.value?.holdings) return [];
-  const cnSymbols = new Set(cnStockPrices.value.map(p => p.symbol));
-  return portfolio.value.holdings.filter(h => cnSymbols.has(h.symbol))
+  if (!portfolio.value?.holdings) return []
+  return portfolio.value.holdings.filter(h => inferHoldingCurrency(h) === 'CNY')
 })
 
 const hkHoldings = computed(() => {
-  if (!portfolio.value?.holdings) return [];
-  const hkSymbols = new Set(hkStockPrices.value.map(p => p.symbol));
-  return portfolio.value.holdings.filter(h => hkSymbols.has(h.symbol))
+  if (!portfolio.value?.holdings) return []
+  return portfolio.value.holdings.filter(h => inferHoldingCurrency(h) === 'HKD')
 })
 
 function getHolding(symbol) { if (!portfolio.value?.holdings) return null; return portfolio.value.holdings.find(h => h.symbol === symbol) }
+
+async function fetchQuoteForSymbol() {
+  const symbol = txForm.value.symbol?.trim().toUpperCase()
+  if (!symbol) {
+    quoteError.value = '请先输入股票代码'
+    latestQuote.value = null
+    return
+  }
+
+  quoteLoading.value = true
+  quoteError.value = ''
+  try {
+    const quote = await api('GET', '/api/market/price/' + encodeURIComponent(symbol))
+    if (!quote) return
+    latestQuote.value = quote
+    if (quote.price != null) txForm.value.price = quote.price
+    if ((!txForm.value.name || txForm.value.name === txForm.value.symbol) && quote.name) {
+      txForm.value.name = quote.name
+    }
+    txForm.value.symbol = symbol
+  } catch (e) {
+    latestQuote.value = null
+    quoteError.value = e.message || '报价查询失败'
+  } finally {
+    quoteLoading.value = false
+  }
+}
+
+function maybeFetchQuoteOnBlur() {
+  if (!txForm.value.symbol?.trim()) return
+  fetchQuoteForSymbol()
+}
+
+function focusHolding(symbol) {
+  const target = document.querySelector(`[data-holding-symbol="${symbol}"]`)
+  if (!target) return
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 
 // Helper to get currency symbol
 function getCurrencySymbol(currency) { return CURRENCY_SYMBOLS[currency] || '$' }
@@ -881,18 +845,14 @@ let refreshInterval
 onMounted(() => {
   applyTheme(); mql.addEventListener('change', onSystemThemeChange)
   loadTvScript()
-  
-  // 检查用户认证状态
-  if (checkAuth()) {
-    loadApplicationData()
-  } else {
-    authView.value = 'login'
+  if (!authToken.value || !currentUser.value) {
+    window.location.replace('/login')
+    return
   }
+  loadApplicationData()
   
   refreshInterval = setInterval(() => {
-    if (isAuthenticated.value) {
-      loadDashboard(); loadMacro()
-    }
+    loadDashboard(); loadMacro()
   }, 60000)
   window.addEventListener('resize', () => { dashPieInstance?.resize(); holdingPieInstance?.resize(); holdingPnlInstance?.resize(); quantPeChartInstance?.resize(); netWorthChartInstance?.resize() })
   document.addEventListener('click', closeMoreMenu)
@@ -901,127 +861,7 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
 </script>
 
 <template>
-  <!-- 认证界面 -->
-  <div v-if="!isAuthenticated" class="auth-container">
-    <!-- 登录页面 -->
-    <div v-if="authView === 'login'" class="auth-box">
-      <div class="auth-logo">📊 Portfolio Monitor</div>
-      <h2>欢迎回来</h2>
-      
-      <form @submit.prevent="loginUser" class="auth-form">
-        <div class="form-group">
-          <label>用户名</label>
-          <input
-            v-model="loginForm.username"
-            type="text"
-            placeholder="请输入用户名"
-            required
-            autocomplete="username"
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>密码</label>
-          <input
-            v-model="loginForm.password"
-            type="password"
-            placeholder="请输入密码"
-            required
-            autocomplete="current-password"
-          >
-        </div>
-        
-        <div v-if="loginError" class="auth-error">{{ loginError }}</div>
-        
-        <button type="submit" class="auth-btn primary" :disabled="loginLoading">
-          {{ loginLoading ? '登录中...' : '登录' }}
-        </button>
-      </form>
-      
-      <div class="auth-footer">
-        还没有账号？
-        <a href="#" @click.prevent="authView = 'register'">立即注册</a>
-      </div>
-    </div>
-    
-    <!-- 注册页面 -->
-    <div v-if="authView === 'register'" class="auth-box">
-      <div class="auth-logo">📊 Portfolio Monitor</div>
-      <h2>创建账户</h2>
-      
-      <form @submit.prevent="registerUser" class="auth-form">
-        <div class="form-group">
-          <label>用户名 *</label>
-          <input
-            v-model="registerForm.username"
-            type="text"
-            placeholder="设置您的用户名"
-            required
-            autocomplete="username"
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>邮箱地址 *</label>
-          <input
-            v-model="registerForm.email"
-            type="email"
-            placeholder="example@email.com"
-            required
-            autocomplete="email"
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>真实姓名</label>
-          <input
-            v-model="registerForm.fullName"
-            type="text"
-            placeholder="可选填写"
-            autocomplete="name"
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>密码 *</label>
-          <input
-            v-model="registerForm.password"
-            type="password"
-            placeholder="至少6个字符"
-            required
-            minlength="6"
-            autocomplete="new-password"
-          >
-        </div>
-        
-        <div class="form-group">
-          <label>确认密码 *</label>
-          <input
-            v-model="registerForm.confirmPassword"
-            type="password"
-            placeholder="再次输入密码"
-            required
-            minlength="6"
-            autocomplete="new-password"
-          >
-        </div>
-        
-        <div v-if="registerError" class="auth-error">{{ registerError }}</div>
-        
-        <button type="submit" class="auth-btn primary" :disabled="registerLoading">
-          {{ registerLoading ? '注册中...' : '注册' }}
-        </button>
-      </form>
-      
-      <div class="auth-footer">
-        已有账号？
-        <a href="#" @click.prevent="authView = 'login'">立即登录</a>
-      </div>
-    </div>
-  </div>
-  
-  <!-- 主应用界面 -->
-  <div v-else>
+  <div>
     <nav class="nav">
       <div class="nav-brand">📊 Portfolio Monitor</div>
       <div class="nav-links">
@@ -1255,9 +1095,9 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
     <div class="grid-2">
       <div>
         <div class="card"><div class="card-header"><h3>🇺🇸 美股持仓</h3><span class="badge">{{ usHoldings.length }}</span></div>
-          <table class="table" v-if="usHoldings.length>0"><thead><tr><th>代码</th><th>名称</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏</th><th>收益率</th></tr></thead><tbody><tr v-for="h in usHoldings" :key="h.symbol"><td class="mono stock-code">{{ h.symbol }}</td><td>{{ h.name }}</td><td>{{ h.shares }}</td><td class="mono">${{ h.avg_cost.toFixed(2) }}</td><td class="mono">${{ h.current_price.toFixed(2) }}</td><td class="mono">${{ fmtNum(h.market_value) }}</td><td :class="pnlClass(h.unrealized_pnl)" class="mono">${{ fmtNum(h.unrealized_pnl) }}</td><td><span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span></td></tr></tbody></table>
+          <table class="table" v-if="usHoldings.length>0"><thead><tr><th>代码</th><th>名称</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏</th><th>收益率</th></tr></thead><tbody><tr v-for="h in usHoldings" :key="h.symbol" :data-holding-symbol="h.symbol" :class="{ 'holding-row-highlight': highlightedHoldingSymbol === h.symbol }"><td class="mono stock-code">{{ h.symbol }}</td><td>{{ h.name }}</td><td>{{ h.shares }}</td><td class="mono">${{ h.avg_cost.toFixed(2) }}</td><td class="mono">${{ h.current_price.toFixed(2) }}</td><td class="mono">${{ fmtNum(h.market_value) }}</td><td :class="pnlClass(h.unrealized_pnl)" class="mono">${{ fmtNum(h.unrealized_pnl) }}</td><td><span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span></td></tr></tbody></table>
           <div class="mobile-card-list" v-if="usHoldings.length>0">
-            <div v-for="h in usHoldings" :key="'m-ush-'+h.symbol" class="mobile-stock-card">
+            <div v-for="h in usHoldings" :key="'m-ush-'+h.symbol" class="mobile-stock-card" :data-holding-symbol="h.symbol" :class="{ 'holding-card-highlight': highlightedHoldingSymbol === h.symbol }">
               <div class="mobile-stock-card-header">
                 <div><span class="stock-symbol-lg">{{ h.symbol }}</span><span class="stock-name-sm">{{ h.name }}</span></div>
                 <span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span>
@@ -1276,9 +1116,9 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
           </div>
           <div v-if="usHoldings.length===0" class="empty">暂无美股持仓</div></div>
         <div class="card mt"><div class="card-header"><h3>🇨🇳 A股持仓</h3><span class="badge">{{ cnHoldings.length }}</span></div>
-          <table class="table" v-if="cnHoldings.length>0"><thead><tr><th>代码</th><th>名称</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏</th><th>收益率</th></tr></thead><tbody><tr v-for="h in cnHoldings" :key="h.symbol"><td class="mono stock-code">{{ h.symbol }}</td><td>{{ h.name }}</td><td>{{ h.shares }}</td><td class="mono">¥{{ h.avg_cost.toFixed(2) }}</td><td class="mono">¥{{ h.current_price.toFixed(2) }}</td><td class="mono">¥{{ fmtNum(h.market_value) }}</td><td :class="pnlClass(h.unrealized_pnl)" class="mono">¥{{ fmtNum(h.unrealized_pnl) }}</td><td><span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span></td></tr></tbody></table>
+          <table class="table" v-if="cnHoldings.length>0"><thead><tr><th>代码</th><th>名称</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏</th><th>收益率</th></tr></thead><tbody><tr v-for="h in cnHoldings" :key="h.symbol" :data-holding-symbol="h.symbol" :class="{ 'holding-row-highlight': highlightedHoldingSymbol === h.symbol }"><td class="mono stock-code">{{ h.symbol }}</td><td>{{ h.name }}</td><td>{{ h.shares }}</td><td class="mono">¥{{ h.avg_cost.toFixed(2) }}</td><td class="mono">¥{{ h.current_price.toFixed(2) }}</td><td class="mono">¥{{ fmtNum(h.market_value) }}</td><td :class="pnlClass(h.unrealized_pnl)" class="mono">¥{{ fmtNum(h.unrealized_pnl) }}</td><td><span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span></td></tr></tbody></table>
           <div class="mobile-card-list" v-if="cnHoldings.length>0">
-            <div v-for="h in cnHoldings" :key="'m-cnh-'+h.symbol" class="mobile-stock-card">
+            <div v-for="h in cnHoldings" :key="'m-cnh-'+h.symbol" class="mobile-stock-card" :data-holding-symbol="h.symbol" :class="{ 'holding-card-highlight': highlightedHoldingSymbol === h.symbol }">
               <div class="mobile-stock-card-header">
                 <div><span class="stock-symbol-lg">{{ h.symbol }}</span><span class="stock-name-sm">{{ h.name }}</span></div>
                 <span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span>
@@ -1297,9 +1137,9 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
           </div>
           <div v-if="cnHoldings.length===0" class="empty">暂无A股持仓</div></div>
         <div class="card mt"><div class="card-header"><h3>🇭🇰 港股持仓</h3><span class="badge">{{ hkHoldings.length }}</span></div>
-          <table class="table" v-if="hkHoldings.length>0"><thead><tr><th>代码</th><th>名称</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏</th><th>收益率</th></tr></thead><tbody><tr v-for="h in hkHoldings" :key="h.symbol"><td class="mono stock-code">{{ h.symbol }}</td><td>{{ h.name }}</td><td>{{ h.shares }}</td><td class="mono">HK${{ h.avg_cost.toFixed(2) }}</td><td class="mono">HK${{ h.current_price.toFixed(2) }}</td><td class="mono">HK${{ fmtNum(h.market_value) }}</td><td :class="pnlClass(h.unrealized_pnl)" class="mono">HK${{ fmtNum(h.unrealized_pnl) }}</td><td><span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span></td></tr></tbody></table>
+          <table class="table" v-if="hkHoldings.length>0"><thead><tr><th>代码</th><th>名称</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>盈亏</th><th>收益率</th></tr></thead><tbody><tr v-for="h in hkHoldings" :key="h.symbol" :data-holding-symbol="h.symbol" :class="{ 'holding-row-highlight': highlightedHoldingSymbol === h.symbol }"><td class="mono stock-code">{{ h.symbol }}</td><td>{{ h.name }}</td><td>{{ h.shares }}</td><td class="mono">HK${{ h.avg_cost.toFixed(2) }}</td><td class="mono">HK${{ h.current_price.toFixed(2) }}</td><td class="mono">HK${{ fmtNum(h.market_value) }}</td><td :class="pnlClass(h.unrealized_pnl)" class="mono">HK${{ fmtNum(h.unrealized_pnl) }}</td><td><span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span></td></tr></tbody></table>
           <div class="mobile-card-list" v-if="hkHoldings.length>0">
-            <div v-for="h in hkHoldings" :key="'m-hkh-'+h.symbol" class="mobile-stock-card">
+            <div v-for="h in hkHoldings" :key="'m-hkh-'+h.symbol" class="mobile-stock-card" :data-holding-symbol="h.symbol" :class="{ 'holding-card-highlight': highlightedHoldingSymbol === h.symbol }">
               <div class="mobile-stock-card-header">
                 <div><span class="stock-symbol-lg">{{ h.symbol }}</span><span class="stock-name-sm">{{ h.name }}</span></div>
                 <span class="pct-badge" :class="pnlClass(h.pnl_pct)">{{ fmtPct(h.pnl_pct) }}</span>
@@ -1484,7 +1324,7 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
     <!-- 添加表单 -->
     <div class="card form-card" v-show="showAddTx" style="margin-bottom:16px">
       <form @submit.prevent="addTransaction" class="form-grid">
-        <div class="form-group"><label>代码</label><input v-model="txForm.symbol" placeholder="GOOGL" required></div>
+        <div class="form-group"><label>代码</label><input v-model="txForm.symbol" placeholder="GOOGL" required @blur="maybeFetchQuoteOnBlur"></div>
         <div class="form-group"><label>名称</label><input v-model="txForm.name" placeholder="谷歌"></div>
         <div class="form-group"><label>操作</label><select v-model="txForm.action"><option value="buy">买入</option><option value="sell">卖出</option></select></div>
         <div class="form-group"><label>价格</label><input v-model.number="txForm.price" type="number" step="0.0001" required></div>
@@ -1492,8 +1332,15 @@ onUnmounted(() => { clearInterval(refreshInterval); mql.removeEventListener('cha
         <div class="form-group"><label>手续费</label><input v-model.number="txForm.fee" type="number" step="0.01"></div>
         <div class="form-group"><label>日期</label><input v-model="txForm.date" type="datetime-local"></div>
         <div class="form-group"><label>备注</label><input v-model="txForm.notes" placeholder="可选"></div>
-        <div class="form-group form-actions"><button type="submit" class="btn-primary">添加</button></div>
+        <div class="form-group form-actions tx-form-actions"><button type="button" class="btn-outline" @click="fetchQuoteForSymbol" :disabled="quoteLoading">{{ quoteLoading ? '查询中...' : '查询报价' }}</button><button type="submit" class="btn-primary">添加</button></div>
       </form>
+      <div v-if="latestQuote" class="quote-preview">
+        <span class="quote-preview-symbol">{{ latestQuote.symbol }}</span>
+        <span>{{ latestQuote.name || '-' }}</span>
+        <span class="mono">{{ fmtPriceWithCurrency(latestQuote.price, latestQuote.currency) }}</span>
+        <span class="pct-badge" :class="pnlClass(latestQuote.change_pct)">{{ fmtPct(latestQuote.change_pct) }}</span>
+      </div>
+      <div v-if="quoteError" class="auth-error tx-quote-error">{{ quoteError }}</div>
       <p class="hint">💡 买入自动扣减现金，卖出自动增加</p>
     </div>
 
